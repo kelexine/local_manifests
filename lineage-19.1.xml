@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest>
-    <remote name="github" fetch="https://github.com" />
-
-    <!-- Cubot P50 (marlon) Trees for LineageOS 19.1 -->
-    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="lineage-19.1" />
-    <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="github" revision="lineage-19.1" />
-</manifest>
