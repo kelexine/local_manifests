@@ -5,4 +5,7 @@
     <!-- Cubot P50 (marlon) Trees for LineageOS 23.2 -->
     <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="lineage-23.2" />
     <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="github" revision="lineage-23.2" />
+
+    <!-- MediaTek Vendor Sepolicy for LineageOS 23.2 -->
+    <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="github" revision="lineage-23.2" />
 </manifest>
