@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    File: axion-2.8.xml
+    Author: kelexine <https://github.com/kelexine>
+    Purpose: Local manifest for building AxionOS on the Cubot P50 (marlon)
+    SPDX-FileCopyrightText: 2026 kelexine
+    SPDX-License-Identifier: Apache-2.0
+
+    Vendor blobs are ROM-agnostic and are pulled from the lineage-23.2
+    vendor branch, since no dedicated AxionOS vendor branch exists (or
+    is needed) for this device.
+-->
+<manifest>
+    <remote name="github" fetch="https://github.com" />
+
+    <!-- Cubot P50 (marlon) Trees for AxionOS (axion-2.8, LineageOS 23.2 base) -->
+    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="axion-2.8" />
+    <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="github" revision="lineage-23.2" />
+
+    <!-- MediaTek Vendor Sepolicy (shared across lineage-23.2 based builds) -->
+    <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="github" revision="lineage-23.2" />
+</manifest>
