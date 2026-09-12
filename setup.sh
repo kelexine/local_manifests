@@ -153,7 +153,9 @@ log "Clearing previously-selected manifest XML files."
 find "${LOCAL_MANIFESTS_DIR}" -maxdepth 1 -name '*.xml' ! -name "${LOCAL_MANIFEST_XML}" -exec rm -f {} +
 
 log "Selecting manifest: ${LOCAL_MANIFEST_XML}"
-cp "${LOCAL_MANIFESTS_DIR}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
+if [[ "${LOCAL_MANIFEST_XML}" != "${ROM}.xml" ]]; then
+    mv -f "${LOCAL_MANIFESTS_DIR}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
+fi
 
 log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
