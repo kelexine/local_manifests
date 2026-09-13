@@ -5,4 +5,7 @@
     <!-- Cubot P50 (marlon) Trees for LineageOS 19.1 -->
     <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="lineage-19.1" />
     <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="github" revision="lineage-19.1" />
+
+    <!-- Cubot P50 (marlon) Kernel Source (4.19.127 MT6765 / MT6762R) -->
+    <project name="kelexine/android_kernel_oppo_mt6765" path="kernel/cubot/marlon" remote="github" revision="p50-bringup" sync-s="true" />
 </manifest>

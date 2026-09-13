@@ -88,8 +88,12 @@ repo sync -j$(nproc)
 | **TWRP 12.1 Recovery** | `twrp-12.1.xml` | `device/cubot/marlon` | `kelexine/twrp_device_cubot_p50` | `marlon-12.1` |
 | **LineageOS 19.1 Device** | `lineage-19.1.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-19.1` |
 | **LineageOS 19.1 Vendor** | `lineage-19.1.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-19.1` |
+| **Kernel Source** | ROM manifests (`axion-2.8`, `lineage-23.2`, `lineage-19.1`) | `kernel/cubot/marlon` | `kelexine/android_kernel_oppo_mt6765` | `p50-bringup` |
 
 All targets also pull `LineageOS/android_device_mediatek_sepolicy_vndr` (on `lineage-23.2`) into `device/mediatek/sepolicy_vndr`, since AxionOS ships no MediaTek-specific vendor sepolicy of its own and relies on the same LineageOS MTK policy base.
+
+### Kernel Toolchain (Android NDK r29)
+The kernel compiles with LLVM/Clang from Android NDK r29. `setup.sh` automatically downloads and verifies the NDK at `~/Android/Ndk/android-ndk-r29` and generates `${WORKSPACE_DIR}/kernel-env.sh`. Source this script before starting your ROM build to export `TARGET_KERNEL_CLANG_PATH` and LLVM cross-compilation flags.
 
 ## Contributing
 - Follow Conventional Commits: `<type>(<scope>): <summary>`

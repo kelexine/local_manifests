@@ -46,6 +46,55 @@ log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
+download_ndk() {
+    local ndk_version="r29"
+    local ndk_zip="android-ndk-${ndk_version}-linux.zip"
+    local ndk_url="https://dl.google.com/android/repository/${ndk_zip}"
+    local ndk_dir="${HOME}/Android/Ndk/android-ndk-${ndk_version}"
+
+    if [[ -d "${ndk_dir}" ]]; then
+        log "NDK ${ndk_version} already installed at ${ndk_dir}"
+        return 0
+    fi
+
+    log "Downloading NDK ${ndk_version}..."
+    mkdir -p "${HOME}/Android/Ndk"
+    if ! curl -L -o "${HOME}/Android/Ndk/${ndk_zip}" "${ndk_url}"; then
+        error "Failed to download NDK from ${ndk_url}"
+        return 1
+    fi
+
+    log "Extracting NDK..."
+    if ! unzip -q "${HOME}/Android/Ndk/${ndk_zip}" -d "${HOME}/Android/Ndk"; then
+        error "Failed to extract NDK"
+        return 1
+    fi
+    rm -f "${HOME}/Android/Ndk/${ndk_zip}"
+
+    log "NDK ${ndk_version} installed at ${ndk_dir}"
+}
+
+configure_ndk_env() {
+    local ndk_version="r29"
+    local ndk_dir="${HOME}/Android/Ndk/android-ndk-${ndk_version}"
+    local env_script="${WORKSPACE_DIR}/kernel-env.sh"
+
+    log "Configuring kernel build environment in ${env_script}..."
+    cat <<EOF > "${env_script}"
+#!/usr/bin/env bash
+# Kernel build environment using Android NDK ${ndk_version}
+export NDK_HOME="${ndk_dir}"
+export PATH="${ndk_dir}/toolchains/llvm/prebuilt/linux-x86_64/bin:\${PATH}"
+export TARGET_KERNEL_CLANG_PATH="${ndk_dir}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+export CLANG_TRIPLE="aarch64-linux-gnu-"
+export CROSS_COMPILE="aarch64-linux-gnu-"
+export LLVM=1
+export LLVM_IAS=1
+EOF
+    chmod +x "${env_script}"
+    log "Environment script created: ${env_script}"
+}
+
 usage() {
     cat <<EOF
 Usage: ${SCRIPT_NAME} <rom> [branch] [workspace_dir]
@@ -114,6 +163,8 @@ readonly LOCAL_MANIFEST_XML="${LOCAL_MANIFEST_FILE[${ROM_BRANCH_KEY}]}.xml"
 
 require_command git
 require_command repo
+require_command curl
+require_command unzip
 
 log "ROM:              ${ROM}"
 log "Branch:           ${BRANCH}"
@@ -159,6 +210,8 @@ fi
 
 log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
+download_ndk
+configure_ndk_env
 
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
-log "Next: source build/envsetup.sh and lunch/axion/breakfast as appropriate for '${ROM}'."
+log "Next: source ${WORKSPACE_DIR}/kernel-env.sh && source build/envsetup.sh, then lunch/axion/breakfast as appropriate for '${ROM}'."
