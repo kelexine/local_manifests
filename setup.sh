@@ -213,5 +213,11 @@ repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYN
 download_ndk
 configure_ndk_env
 
+if [[ -f "${LOCAL_MANIFESTS_DIR}/build-${ROM}.sh" ]]; then
+    log "Installing build script: build-${ROM}.sh -> ${WORKSPACE_DIR}/build.sh"
+    cp -f "${LOCAL_MANIFESTS_DIR}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh"
+    chmod +x "${WORKSPACE_DIR}/build.sh"
+fi
+
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
-log "Next: source ${WORKSPACE_DIR}/kernel-env.sh && source build/envsetup.sh, then lunch/axion/breakfast as appropriate for '${ROM}'."
+log "Next: cd ${WORKSPACE_DIR} && ./build.sh [userdebug|user|eng]"

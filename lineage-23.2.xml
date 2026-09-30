@@ -9,6 +9,9 @@
     <!-- Cubot P50 (marlon) Kernel Source (4.19.127 MT6765 / MT6762R) -->
     <project name="kelexine/android_kernel_oppo_mt6765" path="kernel/cubot/marlon" remote="github" revision="p50-bringup" sync-s="true" />
 
+    <!-- Cubot P50 (marlon) Kernel Out-Of-Tree Modules (Connectivity & MET) -->
+    <project name="kelexine/android_kernel_modules_oppo_mt6765" path="kernel/cubot/marlon-modules" remote="github" revision="oppo/mt6765_r_11.1.4_a16" sync-s="true" />
+
     <!-- MediaTek Vendor Sepolicy for LineageOS 23.2 -->
     <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="github" revision="lineage-23.2" />
 </manifest>
