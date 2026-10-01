@@ -100,7 +100,7 @@ init_android_environment() {
     export TARGET_GAPPS_VARIANT="core"
     export TARGET_INCLUDE_GOOGLE_TELECOMM=false
 
-    local lunch_combo="axion_${DEVICE}-${target_release}-${TARGET_VARIANT}"
+    local lunch_combo="lineage_${DEVICE}-${target_release}-${TARGET_VARIANT}"
     log "Selecting lunch target: ${lunch_combo} (GMS: ${TARGET_GAPPS_VARIANT}, Telecomm: ${TARGET_INCLUDE_GOOGLE_TELECOMM})..."
     lunch "${lunch_combo}" || die "Failed to lunch ${lunch_combo}."
 }
