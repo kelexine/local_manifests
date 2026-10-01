@@ -61,7 +61,9 @@ ensure_vendor_symlinks() {
 setup_kernel_toolchain_env() {
     log "Configuring Android NDK r29 LLVM environment for kernel compilation..."
     export PATH="${NDK_BIN}:${PATH}"
-    export TARGET_KERNEL_CLANG_PATH="${NDK_BIN}"
+    # BoardConfigKernel.mk appends /bin/clang to this path, so point to
+    # the parent of bin/ (linux-x86_64), not bin/ itself — else we get /bin/bin/clang.
+    export TARGET_KERNEL_CLANG_PATH="${NDK_BIN%/bin}"
     export CLANG_TRIPLE="aarch64-linux-gnu-"
     export CROSS_COMPILE="aarch64-linux-gnu-"
     export LLVM=1
