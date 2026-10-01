@@ -12,7 +12,8 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="$(basename "${0}")"
 readonly LOCAL_MANIFESTS_REPO="https://github.com/kelexine/local_manifests"
-readonly REPO_SYNC_JOBS="$(nproc 2>/dev/null || echo 4)"
+readonly TOTAL_CORES="$(nproc 2>/dev/null || echo 4)"
+readonly REPO_SYNC_JOBS="$(( TOTAL_CORES > 16 ? 16 : TOTAL_CORES ))"
 
 declare -A ROM_DEFAULT_BRANCH=(
     [lineage]="23.2"
