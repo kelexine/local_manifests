@@ -80,6 +80,8 @@ setup_kernel_toolchain_env() {
 init_android_environment() {
     log "Initializing AOSP / LineageOS build environment..."
     cd "${WORKSPACE_ROOT}"
+    export ANDROID_BUILD_TOP="${WORKSPACE_ROOT}"
+    export ANDROID_KEY_PATH="${WORKSPACE_ROOT}/vendor/lineage-priv/keys"
     # shellcheck source=/dev/null
     source build/envsetup.sh
 
