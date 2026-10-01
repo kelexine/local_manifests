@@ -5,7 +5,7 @@
 # Purpose: Automated AxionOS ROM build script for Cubot P50 (marlon) with inline kernel & OOT modules
 # Usage: ./build-axion.sh [userdebug|user|eng]
 
-set -euo pipefail
+set -eo pipefail
 
 # --- Configuration & Paths ---
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
