@@ -93,8 +93,13 @@ init_android_environment() {
         target_release="${aosp_target_release:-bp4a}"
     fi
 
+    # GMS Configuration (Core without Google Telecomm)
+    export WITH_GMS=true
+    export TARGET_GAPPS_VARIANT="core"
+    export TARGET_INCLUDE_GOOGLE_TELECOMM=false
+
     local lunch_combo="axion_${DEVICE}-${target_release}-${TARGET_VARIANT}"
-    log "Selecting lunch target: ${lunch_combo}..."
+    log "Selecting lunch target: ${lunch_combo} (GMS: ${TARGET_GAPPS_VARIANT}, Telecomm: ${TARGET_INCLUDE_GOOGLE_TELECOMM})..."
     lunch "${lunch_combo}" || die "Failed to lunch ${lunch_combo}."
 }
 
