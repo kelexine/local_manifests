@@ -26,6 +26,8 @@
     <!-- MediaTek Vendor Sepolicy (shared across lineage-23.2 based builds) -->
     <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="github" revision="lineage-23.2" />
 
-    <!-- AxionFx Audio Enhancement Suite (AxionOS only) -->
+    <!-- AxionFx Audio Enhancement Suite & Native DSP Dependencies (AxionOS only) -->
     <project name="AxionAOSP/android_packages_apps_AxionFx" path="packages/apps/AxionFx" remote="github" revision="lineage-23.2" />
+    <project name="AxionAOSP/android_external_pffft" path="external/pffft" remote="github" revision="lineage-23.2" />
+    <project name="AxionAOSP/android_external_steam-audio" path="external/steam-audio" remote="github" revision="lineage-23.2" />
 </manifest>
