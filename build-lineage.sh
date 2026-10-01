@@ -82,8 +82,10 @@ init_android_environment() {
     cd "${WORKSPACE_ROOT}"
     export ANDROID_BUILD_TOP="${WORKSPACE_ROOT}"
     export ANDROID_KEY_PATH="${WORKSPACE_ROOT}/vendor/lineage-priv/keys"
+    set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh
+    set -e
 
     log "Selecting lunch target: ${LUNCH_TARGET}..."
     lunch "${LUNCH_TARGET}" || die "Failed to lunch ${LUNCH_TARGET}."
