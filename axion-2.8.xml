@@ -11,23 +11,23 @@
     is needed) for this device.
 -->
 <manifest>
-    <remote name="github" fetch="https://github.com" />
+    <remote name="kelexine-gh" fetch="https://github.com" />
 
     <!-- Cubot P50 (marlon) Trees for AxionOS (axion-2.8, LineageOS 23.2 base) -->
-    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="axion-2.8" />
-    <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="github" revision="lineage-23.2" />
+    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="kelexine-gh" revision="axion-2.8" />
+    <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="kelexine-gh" revision="lineage-23.2" />
 
     <!-- Cubot P50 (marlon) Kernel Source (4.19.127 MT6765 / MT6762R) -->
-    <project name="kelexine/android_kernel_oppo_mt6765" path="kernel/cubot/marlon" remote="github" revision="p50-bringup" sync-s="true" />
+    <project name="kelexine/android_kernel_oppo_mt6765" path="kernel/cubot/marlon" remote="kelexine-gh" revision="p50-bringup" sync-s="true" />
 
     <!-- Cubot P50 (marlon) Kernel Out-Of-Tree Modules (Connectivity & MET) -->
-    <project name="kelexine/android_kernel_modules_oppo_mt6765" path="kernel/cubot/marlon-modules" remote="github" revision="oppo/mt6765_r_11.1.4_a16" sync-s="true" />
+    <project name="kelexine/android_kernel_modules_oppo_mt6765" path="kernel/cubot/marlon-modules" remote="kelexine-gh" revision="oppo/mt6765_r_11.1.4_a16" sync-s="true" />
 
     <!-- MediaTek Vendor Sepolicy (shared across lineage-23.2 based builds) -->
-    <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="github" revision="lineage-23.2" />
+    <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="kelexine-gh" revision="lineage-23.2" />
 
     <!-- AxionFx Audio Enhancement Suite & Native DSP Dependencies (AxionOS only) -->
-    <project name="AxionAOSP/android_packages_apps_AxionFx" path="packages/apps/AxionFx" remote="github" revision="lineage-23.2" />
-    <project name="AxionAOSP/android_external_pffft" path="external/pffft" remote="github" revision="lineage-23.2" />
-    <project name="AxionAOSP/android_external_steam-audio" path="external/steam-audio" remote="github" revision="lineage-23.2" />
+    <project name="AxionAOSP/android_packages_apps_AxionFx" path="packages/apps/AxionFx" remote="kelexine-gh" revision="lineage-23.2" />
+    <project name="AxionAOSP/android_external_pffft" path="external/pffft" remote="kelexine-gh" revision="lineage-23.2" />
+    <project name="AxionAOSP/android_external_steam-audio" path="external/steam-audio" remote="kelexine-gh" revision="lineage-23.2" />
 </manifest>
