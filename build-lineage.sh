@@ -177,6 +177,15 @@ build_rom_package() {
     mka bacon -j"$(nproc)" || die "LineageOS packaging failed."
     log "[+] Build completed successfully!"
     log "[+] Output images located at: ${OUT}"
+
+    local pub_dir="/var/www/html/kelexine"
+    if [[ -d "/var/www/html" ]]; then
+        mkdir -p "${pub_dir}"
+        if compgen -G "${OUT}/lineage_*.zip" > /dev/null; then
+            cp -v "${OUT}"/lineage_*.zip "${pub_dir}/" || true
+            log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
+        fi
+    fi
 }
 
 main() {
