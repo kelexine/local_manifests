@@ -12,7 +12,6 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
 readonly DEVICE="marlon"
 readonly TARGET_VARIANT="${1:-userdebug}"
-readonly LUNCH_TARGET="axion_${DEVICE}-${TARGET_VARIANT}"
 
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 readonly MODULES_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}-modules"
@@ -87,8 +86,16 @@ init_android_environment() {
     source build/envsetup.sh
     set -e
 
-    log "Selecting lunch target: ${LUNCH_TARGET}..."
-    lunch "${LUNCH_TARGET}" || die "Failed to lunch ${LUNCH_TARGET}."
+    local target_release="bp4a"
+    if [[ -f "${WORKSPACE_ROOT}/vendor/lineage/vars/aosp_target_release" ]]; then
+        # shellcheck source=/dev/null
+        source "${WORKSPACE_ROOT}/vendor/lineage/vars/aosp_target_release"
+        target_release="${aosp_target_release:-bp4a}"
+    fi
+
+    local lunch_combo="axion_${DEVICE}-${target_release}-${TARGET_VARIANT}"
+    log "Selecting lunch target: ${lunch_combo}..."
+    lunch "${lunch_combo}" || die "Failed to lunch ${lunch_combo}."
 }
 
 build_inline_kernel() {
