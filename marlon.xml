@@ -3,5 +3,5 @@
     <remote name="github" fetch="https://github.com" />
 
     <!-- Cubot P50 (marlon) TWRP 12.1 Device Tree -->
-    <project name="kelexine/twrp_device_cubot_p50" path="device/cubot/marlon" remote="github" revision="marlon-12.1" />
+    <project name="kelexine/twrp_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="marlon-12.1" />
 </manifest>
