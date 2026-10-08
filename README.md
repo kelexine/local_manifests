@@ -85,7 +85,7 @@ repo sync -j$(nproc)
 | **LineageOS 23.2 Vendor** | `lineage-23.2.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` |
 | **AxionOS Device** | `axion-2.8.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `axion-2.8` |
 | **AxionOS Vendor** | `axion-2.8.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` (shared) |
-| **TWRP 12.1 Recovery** | `twrp-12.1.xml` | `device/cubot/marlon` | `kelexine/twrp_device_cubot_p50` | `marlon-12.1` |
+| **TWRP 12.1 Recovery** | `twrp-12.1.xml` | `device/cubot/marlon` | `kelexine/twrp_device_cubot_marlon` | `marlon-12.1` |
 | **LineageOS 19.1 Device** | `lineage-19.1.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-19.1` |
 | **LineageOS 19.1 Vendor** | `lineage-19.1.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-19.1` |
 | **Kernel Source** | ROM manifests (`axion-2.8`, `lineage-23.2`, `lineage-19.1`) | `kernel/cubot/marlon` | `kelexine/android_kernel_oppo_mt6765` | `marlon-bringup` |
