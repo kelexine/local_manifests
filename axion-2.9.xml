@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    File: axion-2.9.xml
+    Author: kelexine <https://github.com/kelexine>
+    Purpose: Local manifest for building AxionOS on the Cubot P50 (marlon)
+    SPDX-FileCopyrightText: 2026 kelexine
+    SPDX-License-Identifier: Apache-2.0
+
+    Vendor blobs are ROM-agnostic and are pulled from the lineage-23.2
+    vendor branch, since no dedicated AxionOS vendor branch exists (or
+    is needed) for this device.
+-->
+<manifest>
+    <remote name="kelexine-gh" fetch="https://github.com" />
+
+    <!-- Cubot P50 (marlon) Trees for AxionOS (axion-2.9, LineageOS 23.2 base) -->
+    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="kelexine-gh" revision="axion-2.9" />
+    <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="kelexine-gh" revision="lineage-23.2" />
+
+    <!-- Cubot P50 (marlon) Kernel Source (4.19.127 MT6765 / MT6762R) -->
+    <project name="kelexine/android_kernel_oppo_mt6765" path="kernel/cubot/marlon" remote="kelexine-gh" revision="marlon-bringup" sync-s="true" />
+
+    <!-- Cubot P50 (marlon) Kernel Out-Of-Tree Modules (Connectivity & MET) -->
+    <project name="kelexine/android_kernel_modules_oppo_mt6765" path="kernel/cubot/marlon-modules" remote="kelexine-gh" revision="oppo/mt6765_r_11.1.4_a16" sync-s="true" />
+
+    <!-- MediaTek Vendor Sepolicy (shared across lineage-23.2 based builds) -->
+    <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="kelexine-gh" revision="lineage-23.2" />
+</manifest>

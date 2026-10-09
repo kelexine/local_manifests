@@ -17,7 +17,7 @@ readonly REPO_SYNC_JOBS="$(( TOTAL_CORES > 16 ? 16 : TOTAL_CORES ))"
 
 declare -A ROM_DEFAULT_BRANCH=(
     [lineage]="23.2"
-    [axion]="2.8"
+    [axion]="2.9"
     [twrp]="12.1"
 )
 
@@ -31,6 +31,7 @@ declare -A ROM_UPSTREAM_URL=(
 declare -A ROM_UPSTREAM_BRANCH=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
+    [axion:2.9]="lineage-23.2"
     [axion:2.8]="lineage-23.2"
     [twrp:12.1]="twrp-12.1"
 )
@@ -39,6 +40,7 @@ declare -A ROM_UPSTREAM_BRANCH=(
 declare -A LOCAL_MANIFEST_FILE=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
+    [axion:2.9]="axion-2.9"
     [axion:2.8]="axion-2.8"
     [twrp:12.1]="twrp-12.1"
 )

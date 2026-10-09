@@ -19,16 +19,16 @@ Examples:
 ```bash
 ./setup.sh lineage                # LineageOS, default branch (23.2)
 ./setup.sh lineage 19.1           # LineageOS 19.1
-./setup.sh axion                  # AxionOS, default branch (2.8)
+./setup.sh axion                  # AxionOS, default branch (2.9)
 ./setup.sh twrp                   # TWRP recovery
-./setup.sh axion 2.8 ~/rom/axion  # explicit workspace directory
+./setup.sh axion 2.9 ~/rom/axion  # explicit workspace directory
 ```
 
 Run `./setup.sh --help` for the full list of supported ROM/branch combinations. The script is idempotent — re-running it against an existing workspace re-checks the manifest wiring and re-syncs rather than starting over.
 
 ## Features
 - **LineageOS 23.2 Support**: Direct sync mapping for `device/cubot/marlon` and `vendor/cubot/marlon` on branch `lineage-23.2`.
-- **AxionOS Support**: Direct sync mapping for `device/cubot/marlon` on branch `axion-2.8`, sharing vendor blobs with `lineage-23.2` (blobs are ROM-agnostic; only the device tree's build/product layer differs for AxionOS).
+- **AxionOS Support**: Direct sync mapping for `device/cubot/marlon` on branch `axion-2.9`, sharing vendor blobs with `lineage-23.2` (blobs are ROM-agnostic; only the device tree's build/product layer differs for AxionOS).
 - **TWRP 12.1 Integration**: Direct sync mapping for `device/cubot/marlon` targeting TWRP 12.1.
 - **Direct Clone Branching**: Pre-configured target branches (`lineage-23.2`, `twrp-12.1`) for direct cloning into `.repo/local_manifests` without file conflicts.
 - **One-command setup**: `setup.sh` on `main` automates repo-init, manifest selection, and sync for any supported ROM/branch combination.
@@ -51,12 +51,12 @@ repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
 
 ### For AxionOS
 
-AxionOS has no dedicated branch on this repo (it lives only on `main` as `axion-2.8.xml`, alongside the other manifest files) since it shares its upstream source (`AxionAOSP/android -b lineage-23.2`) with the LineageOS 23.2 target — only the local manifest selection differs:
+AxionOS has no dedicated branch on this repo (it lives only on `main` as `axion-2.9.xml`, alongside the other manifest files) since it shares its upstream source (`AxionAOSP/android -b lineage-23.2`) with the LineageOS 23.2 target — only the local manifest selection differs:
 
 ```bash
 repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.2 --git-lfs
 git clone https://github.com/kelexine/local_manifests .repo/local_manifests
-cp .repo/local_manifests/axion-2.8.xml .repo/local_manifests/marlon.xml
+cp .repo/local_manifests/axion-2.9.xml .repo/local_manifests/marlon.xml
 rm .repo/local_manifests/lineage-*.xml .repo/local_manifests/twrp-*.xml
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
 ```
@@ -83,12 +83,12 @@ repo sync -j$(nproc)
 | :--- | :--- | :--- | :--- | :--- |
 | **LineageOS 23.2 Device** | `lineage-23.2.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-23.2` |
 | **LineageOS 23.2 Vendor** | `lineage-23.2.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` |
-| **AxionOS Device** | `axion-2.8.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `axion-2.8` |
-| **AxionOS Vendor** | `axion-2.8.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` (shared) |
+| **AxionOS Device** | `axion-2.9.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `axion-2.9` |
+| **AxionOS Vendor** | `axion-2.9.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` (shared) |
 | **TWRP 12.1 Recovery** | `twrp-12.1.xml` | `device/cubot/marlon` | `kelexine/twrp_device_cubot_marlon` | `marlon-12.1` |
 | **LineageOS 19.1 Device** | `lineage-19.1.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-19.1` |
 | **LineageOS 19.1 Vendor** | `lineage-19.1.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-19.1` |
-| **Kernel Source** | ROM manifests (`axion-2.8`, `lineage-23.2`, `lineage-19.1`) | `kernel/cubot/marlon` | `kelexine/android_kernel_oppo_mt6765` | `marlon-bringup` |
+| **Kernel Source** | ROM manifests (`axion-2.9`, `lineage-23.2`, `lineage-19.1`) | `kernel/cubot/marlon` | `kelexine/android_kernel_oppo_mt6765` | `marlon-bringup` |
 
 All targets also pull `LineageOS/android_device_mediatek_sepolicy_vndr` (on `lineage-23.2`) into `device/mediatek/sepolicy_vndr`, since AxionOS ships no MediaTek-specific vendor sepolicy of its own and relies on the same LineageOS MTK policy base.
 
