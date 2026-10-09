@@ -76,6 +76,9 @@ setup_kernel_toolchain_env() {
     export OBJCOPY="llvm-objcopy"
     export OBJDUMP="llvm-objdump"
     export STRIP="llvm-strip"
+    export KCFLAGS="-Wno-unused-command-line-argument"
+    export CFLAGS="-Wno-unused-command-line-argument"
+    export CFLAGS_MODULE="-Wno-unused-command-line-argument"
 }
 
 init_android_environment() {
