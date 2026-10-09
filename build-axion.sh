@@ -100,9 +100,14 @@ init_android_environment() {
     export TARGET_GAPPS_VARIANT="core"
     export TARGET_INCLUDE_GOOGLE_TELECOMM=false
 
-    local lunch_combo="lineage_${DEVICE}-${target_release}-${TARGET_VARIANT}"
-    log "Selecting lunch target: ${lunch_combo} (GMS: ${TARGET_GAPPS_VARIANT}, Telecomm: ${TARGET_INCLUDE_GOOGLE_TELECOMM})..."
-    lunch "${lunch_combo}" || die "Failed to lunch ${lunch_combo}."
+    if declare -F axion >/dev/null; then
+        log "Initializing target via axion helper: axion ${DEVICE} ${TARGET_VARIANT} ${TARGET_GAPPS_VARIANT}..."
+        axion "${DEVICE}" "${TARGET_VARIANT}" "${TARGET_GAPPS_VARIANT}" || die "Failed to target via axion."
+    else
+        local lunch_combo="lineage_${DEVICE}-${target_release}-${TARGET_VARIANT}"
+        log "Selecting lunch target: ${lunch_combo} (GMS: ${TARGET_GAPPS_VARIANT}, Telecomm: ${TARGET_INCLUDE_GOOGLE_TELECOMM})..."
+        lunch "${lunch_combo}" || die "Failed to lunch ${lunch_combo}."
+    fi
 }
 
 build_inline_kernel() {
@@ -201,7 +206,7 @@ build_rom_package() {
         mkdir -p "${pub_dir}"
         if compgen -G "${OUT}/axion_*.zip" > /dev/null; then
             cp -v "${OUT}"/axion_*.zip "${pub_dir}/" || true
-            log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
+            log "[+] Published ROM zip: https://unicorn.serverhive.in/kelexine/"
         fi
     fi
 }
