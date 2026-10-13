@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    File: axion-2.9.xml
+    File: axion.xml
     Author: kelexine <https://github.com/kelexine>
     Purpose: Local manifest for building AxionOS on the Cubot P50 (marlon)
     SPDX-FileCopyrightText: 2026 kelexine
@@ -13,8 +13,8 @@
 <manifest>
     <remote name="kelexine-gh" fetch="https://github.com" />
 
-    <!-- Cubot P50 (marlon) Trees for AxionOS (axion-2.9, LineageOS 23.2 base) -->
-    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="kelexine-gh" revision="axion-2.9" />
+    <!-- Cubot P50 (marlon) Trees for AxionOS (axion, LineageOS 23.2 base) -->
+    <project name="kelexine/android_device_cubot_marlon" path="device/cubot/marlon" remote="kelexine-gh" revision="axion" />
     <project name="kelexine/android_vendor_cubot_marlon" path="vendor/cubot/marlon" remote="kelexine-gh" revision="lineage-23.2" />
 
     <!-- Cubot P50 (marlon) Kernel Source (4.19.127 MT6765 / MT6762R) -->

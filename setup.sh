@@ -17,7 +17,7 @@ readonly REPO_SYNC_JOBS="$(( TOTAL_CORES > 16 ? 16 : TOTAL_CORES ))"
 
 declare -A ROM_DEFAULT_BRANCH=(
     [lineage]="23.2"
-    [axion]="2.9"
+    [axion]="axion"
     [twrp]="12.1"
 )
 
@@ -31,8 +31,7 @@ declare -A ROM_UPSTREAM_URL=(
 declare -A ROM_UPSTREAM_BRANCH=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
-    [axion:2.9]="lineage-23.2"
-    [axion:2.8]="lineage-23.2"
+    [axion:axion]="axion"
     [twrp:12.1]="twrp-12.1"
 )
 
@@ -40,8 +39,7 @@ declare -A ROM_UPSTREAM_BRANCH=(
 declare -A LOCAL_MANIFEST_FILE=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
-    [axion:2.9]="axion-2.9"
-    [axion:2.8]="axion-2.8"
+    [axion:axion]="axion"
     [twrp:12.1]="twrp-12.1"
 )
 
@@ -112,7 +110,7 @@ Examples:
   ${SCRIPT_NAME} lineage
   ${SCRIPT_NAME} lineage 19.1
   ${SCRIPT_NAME} axion
-  ${SCRIPT_NAME} axion 2.8 ~/rom/axion
+  ${SCRIPT_NAME} axion axion ~/rom/axion
   ${SCRIPT_NAME} twrp
 
 Options:

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Script: build-axion.sh
 # Author: kelexine <https://github.com/kelexine>
-# Date: 2026-10-01
-# Purpose: Automated AxionOS ROM build script for Cubot P50 (marlon) with inline kernel & OOT modules
+# Date: 2026-10-13
+# Purpose: Automated AxionOS ROM build script for Cubot P50 (marlon/axion branch)
+#          with inline kernel compilation and out-of-tree MTK connectivity modules.
 # Usage: ./build-axion.sh [userdebug|user|eng]
 
 set -eo pipefail

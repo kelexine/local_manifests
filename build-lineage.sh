@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Script: build-lineage.sh
 # Author: kelexine <https://github.com/kelexine>
-# Date: 2026-10-01
-# Purpose: Automated LineageOS ROM build script for Cubot P50 (marlon) with inline kernel & OOT modules
+# Date: 2026-10-13
+# Purpose: Automated LineageOS ROM build script for Cubot P50 (marlon/lineage-23.2 branch)
+#          with inline kernel compilation and out-of-tree MTK connectivity modules.
 # Usage: ./build-lineage.sh [userdebug|user|eng]
 
 set -eo pipefail
@@ -61,7 +62,9 @@ ensure_vendor_symlinks() {
 setup_kernel_toolchain_env() {
     log "Configuring Android NDK r29 LLVM environment for kernel compilation..."
     export PATH="${NDK_BIN}:${PATH}"
-    export TARGET_KERNEL_CLANG_PATH="${NDK_BIN}"
+    # BoardConfigKernel.mk appends /bin/clang to this path, so point to
+    # the parent of bin/ (linux-x86_64), not bin/ itself — else we get /bin/bin/clang.
+    export TARGET_KERNEL_CLANG_PATH="${NDK_BIN%/bin}"
     export CLANG_TRIPLE="aarch64-linux-gnu-"
     export CROSS_COMPILE="aarch64-linux-gnu-"
     export LLVM=1
@@ -74,6 +77,9 @@ setup_kernel_toolchain_env() {
     export OBJCOPY="llvm-objcopy"
     export OBJDUMP="llvm-objdump"
     export STRIP="llvm-strip"
+    export KCFLAGS="-Wno-unused-command-line-argument"
+    export CFLAGS="-Wno-unused-command-line-argument"
+    export CFLAGS_MODULE="-Wno-unused-command-line-argument"
 }
 
 init_android_environment() {
