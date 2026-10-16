@@ -49,6 +49,25 @@ log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
+setup_logging() {
+    local log_dir="${WORKSPACE_DIR}/logs"
+    local timestamp="$(date +'%Y%m%d_%H%M%S')"
+    local log_file="${log_dir}/setup_${ROM}_${timestamp}.log"
+    local latest_log="${log_dir}/setup_${ROM}_latest.log"
+    local root_log="${WORKSPACE_DIR}/setup.log"
+
+    mkdir -p "${log_dir}"
+    touch "${log_file}"
+    ln -sfn "$(basename "${log_file}")" "${latest_log}" 2>/dev/null || true
+    ln -sfn "logs/$(basename "${log_file}")" "${root_log}" 2>/dev/null || true
+
+    log "Logging setup output to: ${log_file} (symlink: ${root_log})"
+
+    exec 3>&1 4>&2
+    exec > >(tee -a "${log_file}") 2>&1
+    trap 'local_exit_status=$?; exec 1>&3 2>&4; wait; exit ${local_exit_status}' EXIT
+}
+
 download_ndk() {
     local ndk_version="r29"
     local ndk_zip="android-ndk-${ndk_version}-linux.zip"
@@ -177,6 +196,7 @@ log "Workspace:        ${WORKSPACE_DIR}"
 
 mkdir -p "${WORKSPACE_DIR}"
 cd "${WORKSPACE_DIR}"
+setup_logging
 
 if [[ -d .repo ]]; then
     log ".repo already exists in ${WORKSPACE_DIR}; re-running repo init to update manifest settings."
@@ -229,4 +249,5 @@ if [[ -f "${LOCAL_MANIFESTS_DIR}/build-${ROM}.sh" ]]; then
 fi
 
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
+log "Setup log saved to: ${WORKSPACE_DIR}/setup.log"
 log "Next: cd ${WORKSPACE_DIR} && ./build.sh [userdebug|user|eng]"

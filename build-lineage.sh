@@ -22,10 +22,30 @@ readonly VENDOR_BLOBS_DIR="${VENDOR_TREE_DIR}/proprietary/vendor/lib/modules"
 readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r29"
 readonly NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
+readonly LOG_DIR="${WORKSPACE_ROOT}/logs"
+readonly SCRIPT_BASE="$(basename "${0}" .sh)"
+readonly LOG_TIMESTAMP="$(date +'%Y%m%d_%H%M%S')"
+readonly LOG_FILE="${LOG_DIR}/${SCRIPT_BASE}_${LOG_TIMESTAMP}.log"
+readonly LATEST_LOG="${LOG_DIR}/${SCRIPT_BASE}_latest.log"
+readonly ROOT_LOG="${WORKSPACE_ROOT}/build.log"
+
 log()   { printf '\033[1;32m[build-lineage]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[build-lineage]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[build-lineage]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
+
+setup_logging() {
+    mkdir -p "${LOG_DIR}"
+    touch "${LOG_FILE}"
+    ln -sfn "$(basename "${LOG_FILE}")" "${LATEST_LOG}" 2>/dev/null || true
+    ln -sfn "logs/$(basename "${LOG_FILE}")" "${ROOT_LOG}" 2>/dev/null || true
+
+    log "Logging build output to: ${LOG_FILE} (symlink: ${ROOT_LOG})"
+
+    exec 3>&1 4>&2
+    exec > >(tee -a "${LOG_FILE}") 2>&1
+    trap 'local_exit_status=$?; exec 1>&3 2>&4; wait; exit ${local_exit_status}' EXIT
+}
 
 format_duration() {
     local total_secs=$1
@@ -206,6 +226,7 @@ build_rom_package() {
 }
 
 main() {
+    setup_logging
     local start_time
     start_time="$(date +%s)"
 
@@ -220,6 +241,7 @@ main() {
     local end_time
     end_time="$(date +%s)"
     log "[+] Total build time: $(format_duration $((end_time - start_time)))"
+    log "[+] Build log saved to: ${LOG_FILE}"
 }
 
 main "$@"
