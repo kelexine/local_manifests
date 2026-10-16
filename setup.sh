@@ -31,7 +31,8 @@ declare -A ROM_UPSTREAM_URL=(
 declare -A ROM_UPSTREAM_BRANCH=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
-    [axion:axion]="axion"
+    [axion:axion]="lineage-23.2"
+    [axion:23.2]="lineage-23.2"
     [twrp:12.1]="twrp-12.1"
 )
 
@@ -40,6 +41,7 @@ declare -A LOCAL_MANIFEST_FILE=(
     [lineage:23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
     [axion:axion]="axion"
+    [axion:23.2]="axion"
     [twrp:12.1]="twrp-12.1"
 )
 
