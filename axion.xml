@@ -27,5 +27,5 @@
     <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="kelexine-gh" revision="lineage-23.2" />
 
     <!-- MediaTek Hardware HALs and Interfaces -->
-    <project name="LineageOS/android_hardware_mediatek" path="hardware/mediatek" remote="kelexine-gh" revision="lineage-23.2" />
+    <project name="kelexine/android_hardware_mediatek" path="hardware/mediatek" remote="kelexine-gh" revision="lineage-23.2" />
 </manifest>
