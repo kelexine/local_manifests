@@ -213,6 +213,12 @@ fi
 
 log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
+
+if [[ -d "${WORKSPACE_DIR}/kernel/cubot/marlon" ]]; then
+    log "Initializing kernel submodules (MySU)..."
+    git -C "${WORKSPACE_DIR}/kernel/cubot/marlon" submodule update --init --recursive || true
+fi
+
 download_ndk
 configure_ndk_env
 
