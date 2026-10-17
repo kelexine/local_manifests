@@ -205,6 +205,12 @@ init_android_environment() {
     cd "${WORKSPACE_ROOT}"
     export ANDROID_BUILD_TOP="${WORKSPACE_ROOT}"
     export ANDROID_KEY_PATH="${WORKSPACE_ROOT}/vendor/lineage-priv/keys"
+
+    # Purge any conflicting manifests in .repo/local_manifests to ensure build-manifest.xml succeeds
+    if [[ -d "${WORKSPACE_ROOT}/.repo/local_manifests" ]]; then
+        find "${WORKSPACE_ROOT}/.repo/local_manifests" -maxdepth 1 -name '*.xml' ! -name 'axion.xml' -exec rm -f {} +
+    fi
+
     set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh

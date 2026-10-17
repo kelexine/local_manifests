@@ -207,29 +207,37 @@ fi
 repo init -u "${UPSTREAM_URL}" -b "${UPSTREAM_BRANCH}" --git-lfs
 
 readonly LOCAL_MANIFESTS_DIR=".repo/local_manifests"
+readonly LOCAL_MANIFESTS_CACHE=".repo/.local_manifests_repo"
 
+# Migrate legacy setups where .repo/local_manifests was itself the git clone
 if [[ -d "${LOCAL_MANIFESTS_DIR}/.git" ]]; then
-    log "local_manifests already cloned; fetching latest main."
-    git -C "${LOCAL_MANIFESTS_DIR}" fetch origin main
-    git -C "${LOCAL_MANIFESTS_DIR}" checkout main
-    git -C "${LOCAL_MANIFESTS_DIR}" reset --hard origin/main
-else
-    rm -rf "${LOCAL_MANIFESTS_DIR}"
-    log "Cloning local_manifests (main)."
-    git clone -b main "${LOCAL_MANIFESTS_REPO}" "${LOCAL_MANIFESTS_DIR}"
+    log "Migrating legacy .repo/local_manifests git clone to cache directory."
+    rm -rf "${LOCAL_MANIFESTS_CACHE}"
+    mv -f "${LOCAL_MANIFESTS_DIR}" "${LOCAL_MANIFESTS_CACHE}"
 fi
 
-if [[ ! -f "${LOCAL_MANIFESTS_DIR}/${LOCAL_MANIFEST_XML}" ]]; then
+if [[ -d "${LOCAL_MANIFESTS_CACHE}/.git" ]]; then
+    log "local_manifests repo already cloned; fetching latest main."
+    git -C "${LOCAL_MANIFESTS_CACHE}" fetch origin main
+    git -C "${LOCAL_MANIFESTS_CACHE}" checkout main
+    git -C "${LOCAL_MANIFESTS_CACHE}" reset --hard origin/main
+else
+    rm -rf "${LOCAL_MANIFESTS_CACHE}"
+    log "Cloning local_manifests (main) to cache."
+    git clone -b main "${LOCAL_MANIFESTS_REPO}" "${LOCAL_MANIFESTS_CACHE}"
+fi
+
+if [[ ! -f "${LOCAL_MANIFESTS_CACHE}/${LOCAL_MANIFEST_XML}" ]]; then
     die "Expected manifest '${LOCAL_MANIFEST_XML}' not found in local_manifests repo."
 fi
 
-log "Clearing previously-selected manifest XML files."
-find "${LOCAL_MANIFESTS_DIR}" -maxdepth 1 -name '*.xml' ! -name "${LOCAL_MANIFEST_XML}" -exec rm -f {} +
+mkdir -p "${LOCAL_MANIFESTS_DIR}"
 
-log "Selecting manifest: ${LOCAL_MANIFEST_XML}"
-if [[ "${LOCAL_MANIFEST_XML}" != "${ROM}.xml" ]]; then
-    mv -f "${LOCAL_MANIFESTS_DIR}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
-fi
+log "Clearing previously-selected manifest XML files in ${LOCAL_MANIFESTS_DIR}."
+find "${LOCAL_MANIFESTS_DIR}" -maxdepth 1 -name '*.xml' -exec rm -f {} +
+
+log "Installing manifest: ${LOCAL_MANIFEST_XML} -> ${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
+cp -f "${LOCAL_MANIFESTS_CACHE}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
 
 log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
@@ -242,9 +250,9 @@ fi
 download_ndk
 configure_ndk_env
 
-if [[ -f "${LOCAL_MANIFESTS_DIR}/build-${ROM}.sh" ]]; then
+if [[ -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" ]]; then
     log "Installing build script: build-${ROM}.sh -> ${WORKSPACE_DIR}/build.sh"
-    cp -f "${LOCAL_MANIFESTS_DIR}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh"
+    cp -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh"
     chmod +x "${WORKSPACE_DIR}/build.sh"
 fi
 
