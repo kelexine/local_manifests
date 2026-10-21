@@ -372,7 +372,7 @@ build_rom_package() {
         mkdir -p "${pub_dir}"
         if compgen -G "${OUT}/axion_*.zip" > /dev/null; then
             cp -v "${OUT}"/axion_*.zip "${pub_dir}/" || true
-            log "[+] Published ROM zip: https://unicorn.serverhive.in/kelexine/"
+            log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
         fi
     fi
 }

@@ -30,19 +30,29 @@ declare -A ROM_UPSTREAM_URL=(
 # rom:branch -> upstream manifest branch name
 declare -A ROM_UPSTREAM_BRANCH=(
     [lineage:23.2]="lineage-23.2"
+    [lineage:lineage-23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
+    [lineage:lineage-19.1]="lineage-19.1"
     [axion:axion]="lineage-23.2"
     [axion:23.2]="lineage-23.2"
+    [axion:lineage-23.2]="lineage-23.2"
     [twrp:12.1]="twrp-12.1"
+    [twrp:twrp-12.1]="twrp-12.1"
+    [twrp:twrp]="twrp-12.1"
 )
 
 # rom:branch -> local_manifests xml filename (no extension)
 declare -A LOCAL_MANIFEST_FILE=(
     [lineage:23.2]="lineage-23.2"
+    [lineage:lineage-23.2]="lineage-23.2"
     [lineage:19.1]="lineage-19.1"
+    [lineage:lineage-19.1]="lineage-19.1"
     [axion:axion]="axion"
     [axion:23.2]="axion"
+    [axion:lineage-23.2]="axion"
     [twrp:12.1]="twrp-12.1"
+    [twrp:twrp-12.1]="twrp-12.1"
+    [twrp:twrp]="twrp-12.1"
 )
 
 log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
@@ -151,14 +161,28 @@ fi
 readonly ROM="${1}"
 shift || true
 
-BRANCH="${1:-}"
-if [[ -n "${BRANCH:-}" && ! "${BRANCH}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    die "Invalid branch '${BRANCH}'."
-fi
-[[ $# -gt 0 ]] && shift || true
+BRANCH=""
+WORKSPACE_DIR=""
 
-WORKSPACE_DIR="${1:-${PWD}/${ROM}}"
-[[ $# -gt 0 ]] && shift || true
+if [[ $# -gt 0 ]]; then
+    # If the next argument looks like a path (contains '/'), treat it as WORKSPACE_DIR
+    if [[ "${1}" == */* ]]; then
+        WORKSPACE_DIR="${1}"
+        shift || true
+    else
+        # Strip optional "<rom>:" prefix if user passed e.g. "twrp:12.1"
+        BRANCH="${1#${ROM}:}"
+        if [[ -n "${BRANCH}" && ! "${BRANCH}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            die "Invalid branch '${1}'."
+        fi
+        shift || true
+    fi
+fi
+
+if [[ -z "${WORKSPACE_DIR}" ]]; then
+    WORKSPACE_DIR="${1:-${PWD}/${ROM}}"
+    [[ $# -gt 0 ]] && shift || true
+fi
 
 if [[ -z "${ROM_DEFAULT_BRANCH[${ROM}]+set}" ]]; then
     die "Unknown ROM '${ROM}'. Supported: ${!ROM_DEFAULT_BRANCH[*]}"
@@ -245,10 +269,12 @@ repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYN
 if [[ -d "${WORKSPACE_DIR}/kernel/cubot/marlon" ]]; then
     log "Initializing kernel submodules (MySU)..."
     git -C "${WORKSPACE_DIR}/kernel/cubot/marlon" submodule update --init --recursive || true
+    download_ndk
+    configure_ndk_env
+elif [[ "${ROM}" != "twrp" ]]; then
+    download_ndk
+    configure_ndk_env
 fi
-
-download_ndk
-configure_ndk_env
 
 if [[ -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" ]]; then
     log "Installing build script: build-${ROM}.sh -> ${WORKSPACE_DIR}/build.sh"
@@ -258,4 +284,8 @@ fi
 
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
 log "Setup log saved to: ${WORKSPACE_DIR}/setup.log"
-log "Next: cd ${WORKSPACE_DIR} && ./build.sh [userdebug|user|eng]"
+if [[ "${ROM}" == "twrp" ]]; then
+    log "Next: cd ${WORKSPACE_DIR} && ./build.sh [eng|userdebug|user]"
+else
+    log "Next: cd ${WORKSPACE_DIR} && ./build.sh [userdebug|user|eng]"
+fi
