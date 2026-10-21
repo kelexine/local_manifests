@@ -370,8 +370,11 @@ build_rom_package() {
     local pub_dir="/var/www/html/kelexine"
     if [[ -d "/var/www/html" ]]; then
         mkdir -p "${pub_dir}"
-        if compgen -G "${OUT}/axion_*.zip" > /dev/null; then
-            cp -v "${OUT}"/axion_*.zip "${pub_dir}/" || true
+        if compgen -G "${OUT}/axion*.zip" > /dev/null; then
+            cp -v "${OUT}"/axion*.zip "${pub_dir}/" || true
+            local latest_zip
+            latest_zip="$(find "${OUT}" -maxdepth 1 -name 'axion*.zip' | head -n 1)"
+            [[ -n "${latest_zip}" ]] && ln -sfn "$(basename "${latest_zip}")" "${pub_dir}/axion-marlon-latest.zip" 2>/dev/null || true
             log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
         fi
     fi
