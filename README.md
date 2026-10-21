@@ -1,9 +1,9 @@
 # Cubot P50 (marlon) Local Manifests
 
-> Local manifests repository for syncing and building LineageOS, AxionOS, and TWRP recovery for the Cubot P50 (marlon).
+> Local manifests repository for syncing and building LineageOS, AxionOS, TWRP, and OrangeFox Recovery for the Cubot P50 (marlon).
 
 ## What is this?
-This repository provides the `.repo/local_manifests` configurations required to sync device trees, proprietary vendor blobs, and recovery configurations for the **Cubot P50** (`marlon` / `v956`, MediaTek MT6765). It supports LineageOS 23.2 (Android 16 baseline), LineageOS 19.1 (legacy Android 12 baseline), AxionOS (built on the axion branch), and TWRP 12.1.
+This repository provides the `.repo/local_manifests` configurations required to sync device trees, proprietary vendor blobs, and recovery configurations for the **Cubot P50** (`marlon` / `v956`, MediaTek MT6765). It supports LineageOS 23.2 (Android 16 baseline), LineageOS 19.1 (legacy Android 12 baseline), AxionOS (built on the axion branch), TWRP 12.1, and OrangeFox Recovery Project 12.1.
 
 ## Quick Start: `setup.sh`
 
@@ -21,6 +21,7 @@ Examples:
 ./setup.sh lineage 19.1                 # LineageOS 19.1
 ./setup.sh axion                        # AxionOS (axion branch)
 ./setup.sh twrp                         # TWRP recovery
+./setup.sh ofrp                         # OrangeFox recovery (fox_12.1)
 ./setup.sh axion axion ~/rom/axion      # explicit workspace directory
 ```
 
@@ -30,6 +31,7 @@ Run `./setup.sh --help` for the full list of supported ROM/branch combinations. 
 - **LineageOS 23.2 Support**: Direct sync mapping for `device/cubot/marlon` and `vendor/cubot/marlon` on branch `lineage-23.2`.
 - **AxionOS Support**: Direct sync mapping for `device/cubot/marlon` on branch `axion`, sharing vendor blobs with `lineage-23.2` (blobs are ROM-agnostic; only the device tree's build/product layer differs for AxionOS).
 - **TWRP 12.1 Integration**: Direct sync mapping for `device/cubot/marlon` targeting TWRP 12.1.
+- **OrangeFox 12.1 Integration**: Direct sync mapping for `device/cubot/marlon` targeting OrangeFox `fox_12.1` (`ofox_marlon`).
 - **One-command setup**: `setup.sh` on `main` automates repo-init, manifest selection, and sync for any supported ROM/branch combination.
 
 ## Manifest Files
@@ -40,6 +42,7 @@ Run `./setup.sh --help` for the full list of supported ROM/branch combinations. 
 | `lineage-23.2.xml` | LineageOS 23.2 | `lineage-23.2` |
 | `lineage-19.1.xml` | LineageOS 19.1 | `lineage-19.1` |
 | `twrp-12.1.xml` | TWRP 12.1 | `marlon-12.1` |
+| `ofrp-12.1.xml` | OrangeFox 12.1 | `main` |
 
 ## Manual Installation
 
@@ -66,6 +69,13 @@ git clone https://github.com/kelexine/local_manifests -b twrp-12.1 .repo/local_m
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
 ```
 
+### For OrangeFox 12.1
+```bash
+git clone https://github.com/kelexine/local_manifests -b main .repo/local_manifests
+cp .repo/local_manifests/ofrp-12.1.xml .repo/local_manifests/marlon.xml
+repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
+```
+
 ## Architecture
 
 | Target | Manifest File | Target Path | Remote / Upstream Repository | Revision |
@@ -75,6 +85,7 @@ repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
 | **LineageOS 23.2 Device** | `lineage-23.2.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-23.2` |
 | **LineageOS 23.2 Vendor** | `lineage-23.2.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-23.2` |
 | **TWRP 12.1 Recovery** | `twrp-12.1.xml` | `device/cubot/marlon` | `kelexine/twrp_device_cubot_marlon` | `marlon-12.1` |
+| **OrangeFox 12.1 Recovery** | `ofrp-12.1.xml` | `device/cubot/marlon` | `kelexine/ofrp_device_cubot_marlon` | `main` |
 | **LineageOS 19.1 Device** | `lineage-19.1.xml` | `device/cubot/marlon` | `kelexine/android_device_cubot_marlon` | `lineage-19.1` |
 | **LineageOS 19.1 Vendor** | `lineage-19.1.xml` | `vendor/cubot/marlon` | `kelexine/android_vendor_cubot_marlon` | `lineage-19.1` |
 | **Kernel Source** | All manifests | `kernel/cubot/marlon` | `kelexine/android_kernel_cubot_mt6765` | `marlon` |

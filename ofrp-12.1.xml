@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="github" fetch="https://github.com" />
+
+    <!-- Cubot P50 (marlon) OrangeFox Recovery Project 12.1 Device Tree -->
+    <project name="kelexine/ofrp_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="main" />
+</manifest>

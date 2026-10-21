@@ -19,12 +19,14 @@ declare -A ROM_DEFAULT_BRANCH=(
     [lineage]="23.2"
     [axion]="axion"
     [twrp]="12.1"
+    [ofrp]="12.1"
 )
 
 declare -A ROM_UPSTREAM_URL=(
     [lineage]="https://github.com/LineageOS/android"
     [axion]="https://github.com/AxionAOSP/android"
     [twrp]="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp"
+    [ofrp]="https://gitlab.com/OrangeFox/manifest.git"
 )
 
 # rom:branch -> upstream manifest branch name
@@ -39,6 +41,9 @@ declare -A ROM_UPSTREAM_BRANCH=(
     [twrp:12.1]="twrp-12.1"
     [twrp:twrp-12.1]="twrp-12.1"
     [twrp:twrp]="twrp-12.1"
+    [ofrp:12.1]="fox_12.1"
+    [ofrp:fox_12.1]="fox_12.1"
+    [ofrp:fox]="fox_12.1"
 )
 
 # rom:branch -> local_manifests xml filename (no extension)
@@ -53,6 +58,9 @@ declare -A LOCAL_MANIFEST_FILE=(
     [twrp:12.1]="twrp-12.1"
     [twrp:twrp-12.1]="twrp-12.1"
     [twrp:twrp]="twrp-12.1"
+    [ofrp:12.1]="ofrp-12.1"
+    [ofrp:fox_12.1]="ofrp-12.1"
+    [ofrp:fox]="ofrp-12.1"
 )
 
 log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
@@ -174,6 +182,7 @@ Examples:
   ${SCRIPT_NAME} axion
   ${SCRIPT_NAME} axion axion ~/rom/axion
   ${SCRIPT_NAME} twrp
+  ${SCRIPT_NAME} ofrp
 
 Options:
   -h, --help    Show this help message and exit.
