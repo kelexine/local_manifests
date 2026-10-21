@@ -127,6 +127,37 @@ EOF
     log "Environment script created: ${env_script}"
 }
 
+configure_signing_keys() {
+    local keys_dir="${WORKSPACE_DIR}/vendor/lineage-priv/keys"
+    local external_certs="${HOME}/android-certs"
+
+    if [[ ! -d "${keys_dir}" && -d "${external_certs}" ]]; then
+        log "Staging signing keys from ${external_certs} into ${keys_dir}..."
+        mkdir -p "${keys_dir}"
+        cp -a "${external_certs}/"* "${keys_dir}/"
+    fi
+
+    if [[ -d "${keys_dir}" ]]; then
+        log "Ensuring signing keys configuration exists in ${keys_dir}..."
+        cat <<'EOF' > "${keys_dir}/keys.mk"
+PRODUCT_DEFAULT_DEV_CERTIFICATE := vendor/lineage-priv/keys/releasekey
+PRODUCT_MAINLINE_SEPOLICY_DEV_CERTIFICATES := $(dir $(PRODUCT_DEFAULT_DEV_CERTIFICATE))
+PRODUCT_MAINLINE_BLUETOOTH_SEPOLICY_DEV_CERTIFICATES := $(dir $(PRODUCT_DEFAULT_DEV_CERTIFICATE))
+EOF
+        cat <<'EOF' > "${keys_dir}/BUILD.bazel"
+filegroup(
+    name = "android_certificate_directory",
+    srcs = glob([
+        "*.pk8",
+        "*.pem",
+    ]),
+    visibility = ["//visibility:public"],
+)
+EOF
+        log "Signing keys configured: ${keys_dir}/keys.mk and BUILD.bazel"
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: ${SCRIPT_NAME} <rom> [branch] [workspace_dir]
@@ -274,6 +305,10 @@ if [[ -d "${WORKSPACE_DIR}/kernel/cubot/marlon" ]]; then
 elif [[ "${ROM}" != "twrp" ]]; then
     download_ndk
     configure_ndk_env
+fi
+
+if [[ "${ROM}" != "twrp" ]]; then
+    configure_signing_keys
 fi
 
 if [[ -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" ]]; then
