@@ -147,7 +147,7 @@ build_and_stage_oot_modules() {
 
     local std_vars=(
         CONFIG_MTK_PLATFORM="mt6765"
-        CONFIG_MTK_COMBO_CHIP="CONSYS_6765"
+        CONFIG_MTK_COMBO_CHIP='"CONSYS_6765"'
         KERNEL_OUT="${kernel_out}"
         TOP="${modules_top}"
         ARCH="arm64"
