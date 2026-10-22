@@ -17,7 +17,6 @@ readonly TARGET_VARIANT="${1:-userdebug}"
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 readonly MODULES_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}-modules"
 readonly VENDOR_TREE_DIR="${WORKSPACE_ROOT}/vendor/cubot/${DEVICE}"
-readonly VENDOR_BLOBS_DIR="${VENDOR_TREE_DIR}/proprietary/vendor/lib/modules"
 
 readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r29"
 readonly NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -165,7 +164,6 @@ build_and_stage_oot_modules() {
     )
 
     local target_vendor_modules="${OUT}/vendor/lib/modules"
-    mkdir -p "${VENDOR_BLOBS_DIR}"
     mkdir -p "${target_vendor_modules}"
 
     compile_module() {
@@ -180,9 +178,8 @@ build_and_stage_oot_modules() {
         built_ko="$(find "${src}" -maxdepth 2 -name "${name}.ko" | head -n 1)"
         [[ -f "${built_ko}" ]] || die "Failed to find built module ${name}.ko"
 
-        "${STRIP}" --strip-debug "${built_ko}" -o "${VENDOR_BLOBS_DIR}/${name}.ko"
-        cp -f "${VENDOR_BLOBS_DIR}/${name}.ko" "${target_vendor_modules}/${name}.ko"
-        log "     [+] Staged ${name}.ko (overwriting stock module)"
+        "${STRIP}" --strip-debug "${built_ko}" -o "${target_vendor_modules}/${name}.ko"
+        log "     [+] Staged ${name}.ko"
     }
 
     local wmt_sym="${conn}/common/Module.symvers"
@@ -211,6 +208,17 @@ build_and_stage_oot_modules() {
 
     # 6. met
     compile_module "met" "${vendor_dir}/mediatek/kernel_modules/met_drv_v2"
+
+    cat << 'EOF' > "${target_vendor_modules}/modules.load"
+kheaders.ko
+trace_mmstat.ko
+wmt_drv.ko
+gps_drv.ko
+wmt_chrdev_wifi.ko
+bt_drv.ko
+wlan_drv_gen4m.ko
+met.ko
+EOF
 
     log "[+] All out-of-tree modules successfully compiled and staged."
 }
