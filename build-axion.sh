@@ -353,7 +353,6 @@ gps_drv.ko
 wmt_chrdev_wifi.ko
 wlan_drv_gen4m.ko
 met.ko
-ax_dragonite.ko
 trace_mmstat.ko
 kheaders.ko
 EOF
