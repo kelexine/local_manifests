@@ -131,7 +131,7 @@ init_android_environment() {
 
 build_inline_kernel() {
     log "Building inline kernel and dtbs via mka..."
-    mka kernel dtboimage || die "Kernel compilation failed."
+    mka "${OUT}/kernel" dtboimage || die "Kernel compilation failed."
 }
 
 build_and_stage_oot_modules() {
@@ -163,7 +163,9 @@ build_and_stage_oot_modules() {
         CROSS_COMPILE="aarch64-linux-gnu-"
     )
 
+    local target_oot_modules="${OUT}/obj/KERNEL_MODULES_OOT"
     local target_vendor_modules="${OUT}/vendor/lib/modules"
+    mkdir -p "${target_oot_modules}"
     mkdir -p "${target_vendor_modules}"
 
     compile_module() {
@@ -178,7 +180,8 @@ build_and_stage_oot_modules() {
         built_ko="$(find "${src}" -maxdepth 2 -name "${name}.ko" | head -n 1)"
         [[ -f "${built_ko}" ]] || die "Failed to find built module ${name}.ko"
 
-        "${STRIP}" --strip-debug "${built_ko}" -o "${target_vendor_modules}/${name}.ko"
+        "${STRIP}" --strip-debug "${built_ko}" -o "${target_oot_modules}/${name}.ko"
+        cp -f "${target_oot_modules}/${name}.ko" "${target_vendor_modules}/${name}.ko"
         log "     [+] Staged ${name}.ko"
     }
 
@@ -210,14 +213,15 @@ build_and_stage_oot_modules() {
     compile_module "met" "${vendor_dir}/mediatek/kernel_modules/met_drv_v2"
 
     cat << 'EOF' > "${target_vendor_modules}/modules.load"
-kheaders.ko
-trace_mmstat.ko
 wmt_drv.ko
+bt_drv.ko
 gps_drv.ko
 wmt_chrdev_wifi.ko
-bt_drv.ko
 wlan_drv_gen4m.ko
 met.ko
+ax_dragonite.ko
+trace_mmstat.ko
+kheaders.ko
 EOF
 
     log "[+] All out-of-tree modules successfully compiled and staged."
