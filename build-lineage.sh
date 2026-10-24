@@ -131,7 +131,7 @@ init_android_environment() {
 
 build_inline_kernel() {
     log "Building inline kernel and dtbs via mka..."
-    mka "${OUT}/kernel" dtboimage || die "Kernel compilation failed."
+    mka kernel dtboimage || die "Kernel compilation failed."
 }
 
 build_and_stage_oot_modules() {
