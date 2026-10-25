@@ -337,8 +337,10 @@ generate_release_notes() {
   - **Syscall 439 (\`faccessat2\`):** Modern access validation integrated with MTK \`inode_permission2\` VFS security framework.
   - **Syscall 440 (\`process_madvise\`):** External memory hinting API for modern Android memory daemons with arm64 32-bit compat plumbing.
   - **Syscall 441 (\`epoll_pwait2\`):** High-precision nanosecond epoll wait with 64-bit and compat 32-bit plumbing.
-  - **Kernel Defconfig Enablements:**
-    - \`CONFIG_USERFAULTFD=y\`: Enables userfaultfd subsystem for user-space page fault management.
+  - **Memory Management & ART CMC GC Support:**
+    - **Syscall \`mremap(MREMAP_DONTUNMAP)\`:** Upstream backport for anonymous and shared memory (memfd/shmem), allowing Java heap physical pages to be remapped without unmapping the virtual address space.
+    - **Userfaultfd Minor Faults (\`UFFDIO_CONTINUE\`):** Backported minor-fault registration (\`UFFDIO_REGISTER_MODE_MINOR\`) and continuation ioctl (\`UFFDIO_CONTINUE\`) for hugetlbfs and shmem, satisfying the kernel prerequisites for Android Runtime (ART) Concurrent Mark-Compact (CMC) Garbage Collection.
+    - \`CONFIG_USERFAULTFD=y\`: Enables userfaultfd subsystem and \`HAVE_ARCH_USERFAULTFD_MINOR\`.
     - \`CONFIG_MEMCG=y\` & \`CONFIG_MEMCG_SWAP=y\`: Full memory control groups for Android 15/16 memory isolation.
     - \`CONFIG_PSI=y\`: Pressure Stall Information enabled for precise \`lmkd\` low-memory management.
 
