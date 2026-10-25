@@ -135,6 +135,42 @@ EOF
     log "Environment script created: ${env_script}"
 }
 
+apply_rom_patches() {
+    local patches_dir=""
+    if [[ -d "${LOCAL_MANIFESTS_CACHE}/patches" ]]; then
+        patches_dir="${LOCAL_MANIFESTS_CACHE}/patches"
+    elif [[ -d "${WORKSPACE_DIR}/device/cubot/marlon/patches" ]]; then
+        patches_dir="${WORKSPACE_DIR}/device/cubot/marlon/patches"
+    fi
+
+    if [[ -z "${patches_dir}" || ! -d "${patches_dir}" ]]; then
+        log "No ROM patches directory found, skipping patch application."
+        return 0
+    fi
+
+    log "Applying ROM patches from: ${patches_dir}"
+    find "${patches_dir}" -type f -name '*.patch' | sort | while read -r patch_file; do
+        local rel_dir
+        rel_dir="$(dirname "${patch_file#"${patches_dir}/"}")"
+        local target_repo="${WORKSPACE_DIR}/${rel_dir}"
+
+        if [[ ! -d "${target_repo}" ]]; then
+            log "Target repository ${target_repo} does not exist, skipping $(basename "${patch_file}")"
+            continue
+        fi
+
+        log "Checking patch $(basename "${patch_file}") for ${rel_dir}..."
+        if git -C "${target_repo}" apply --check --reverse "${patch_file}" >/dev/null 2>&1; then
+            log "Patch $(basename "${patch_file}") already applied in ${rel_dir}, skipping."
+        elif git -C "${target_repo}" apply --check "${patch_file}" >/dev/null 2>&1; then
+            log "Applying $(basename "${patch_file}") to ${rel_dir}..."
+            git -C "${target_repo}" am "${patch_file}" 2>/dev/null || git -C "${target_repo}" apply "${patch_file}"
+        else
+            log "Patch $(basename "${patch_file}") cannot be applied cleanly to ${rel_dir} (may already be merged), skipping."
+        fi
+    done
+}
+
 configure_signing_keys() {
     local keys_dir="${WORKSPACE_DIR}/vendor/lineage-priv/keys"
     local external_certs="${HOME}/android-certs"
@@ -305,6 +341,8 @@ cp -f "${LOCAL_MANIFESTS_CACHE}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/$
 
 log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
 repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
+
+apply_rom_patches
 
 if [[ -d "${WORKSPACE_DIR}/kernel/cubot/marlon" ]]; then
     log "Initializing kernel submodules (MySU)..."
