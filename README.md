@@ -96,6 +96,25 @@ All targets also pull `LineageOS/android_device_mediatek_sepolicy_vndr` (on `lin
 ### Kernel Toolchain (Android NDK r29)
 The kernel compiles with LLVM/Clang from Android NDK r29. `setup.sh` automatically downloads and verifies the NDK at `~/Android/Ndk/android-ndk-r29` and generates `${WORKSPACE_DIR}/kernel-env.sh`. Source this script before starting your ROM build to export `TARGET_KERNEL_CLANG_PATH` and LLVM cross-compilation flags.
 
+## Publishing Releases: `push-release.sh`
+
+An automated, idempotent GitHub release script is included to publish ROM builds and standalone partition images:
+
+```bash
+./push-release.sh [options] [out/target/product/marlon]
+```
+
+- **Idempotent:** Re-running against an existing tag updates release notes and clobbers/updates assets without duplicating or failing.
+- **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
+- **Options:**
+  - `-d, --dir <path>`: Target product directory.
+  - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/android_device_cubot_marlon`).
+  - `-t, --tag <tag>`: Custom tag name (auto-detected if omitted).
+  - `-m, --title <title>`: Custom release title.
+  - `--dry-run`: Preview assets and release notes without uploading.
+
+Alternatively, pass `--release` directly to `./build-axion.sh` to upload automatically upon a successful build.
+
 ## Contributing
 - Follow Conventional Commits: `<type>(<scope>): <summary>`
 - Branch naming: `<type>/<short-slug>`

@@ -24,6 +24,7 @@ ENABLE_RBE=false
 CLEAR_RBE=false
 SKIP_GLOBS=false
 KERNEL_ONLY=false
+AUTO_RELEASE=false
 
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 readonly MODULES_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}-modules"
@@ -69,6 +70,7 @@ Optimizations & Options:
   --clear-rbe                     Discard local RBE action cache via clearRBECache
   --skip-globs                    Skip ninja globs via skipGlobs 1
   --kernel-only, bKernel, -k      Build only inline kernel + out-of-tree modules
+  --release, -r                   Push completed build artifacts to GitHub Release via push-release.sh
 
 Examples:
   ./build.sh userdebug
@@ -118,6 +120,9 @@ parse_arguments() {
                 ;;
             --kernel-only|bKernel|-k)
                 KERNEL_ONLY=true
+                ;;
+            --release|-r)
+                AUTO_RELEASE=true
                 ;;
             -h|--help)
                 show_help
@@ -379,15 +384,25 @@ build_rom_package() {
     log "[+] Output images located at: ${OUT}"
 
     local pub_dir="/var/www/html/kelexine"
-    if [[ -d "/var/www/html" ]]; then
-        mkdir -p "${pub_dir}"
+    if [[ -d "/var/www/html" && -w "/var/www/html" ]] || [[ -w "${pub_dir}" ]]; then
+        mkdir -p "${pub_dir}" 2>/dev/null || true
         if compgen -G "${OUT}/axion*.zip" > /dev/null; then
-            cp -v "${OUT}"/axion*.zip "${pub_dir}/" || true
+            cp -v "${OUT}"/axion*.zip "${pub_dir}/" 2>/dev/null || true
             local latest_zip
             latest_zip="$(find "${OUT}" -maxdepth 1 -name 'axion*.zip' | head -n 1)"
             [[ -n "${latest_zip}" ]] && ln -sfn "$(basename "${latest_zip}")" "${pub_dir}/axion-marlon-latest.zip" 2>/dev/null || true
             log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
         fi
+    fi
+
+    if [[ "${AUTO_RELEASE}" == "true" ]]; then
+        if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
+            log "Triggering automatic GitHub release push..."
+            "${WORKSPACE_ROOT}/push-release.sh" "${OUT}" || warn "Release upload failed or was skipped."
+        fi
+    else
+        log "[*] To publish this build to GitHub Releases, run:"
+        log "    ./push-release.sh ${OUT}"
     fi
 }
 
