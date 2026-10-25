@@ -10,9 +10,20 @@ set -eo pipefail
 
 # --- Configuration & Paths ---
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+if [[ -f "${SCRIPT_DIR}/build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+elif [[ -f "${SCRIPT_DIR}/../../build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+elif [[ -f "$(pwd)/build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="$(pwd)"
+else
+    readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+fi
 readonly DEVICE="marlon"
-readonly TARGET_VARIANT="${1:-userdebug}"
+TARGET_VARIANT="userdebug"
+JOB_COUNT=""
+KERNEL_ONLY=false
+AUTO_RELEASE=false
 
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 readonly MODULES_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}-modules"
@@ -32,6 +43,56 @@ log()   { printf '\033[1;32m[build-lineage]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[build-lineage]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[build-lineage]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
+
+show_help() {
+    cat <<'EOF'
+LineageOS Build Script for Cubot P50 (marlon)
+
+Usage:
+  ./build-lineage.sh [variant] [options]
+
+Arguments:
+  variant                         Target variant: userdebug (default), user, eng
+
+Options:
+  -j, -j<N>, --jobs <N>           Parallel make/ninja job count
+  --kernel-only, -k               Compile inline kernel, dtbs, and OOT modules only
+  --release, -r                   Push completed build artifacts to GitHub Release via push-release.sh
+  -h, --help                      Show this help message
+EOF
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            userdebug|user|eng)
+                TARGET_VARIANT="$1"
+                ;;
+            -j|--jobs)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an integer argument."
+                JOB_COUNT="$2"
+                shift
+                ;;
+            -j*)
+                JOB_COUNT="${1#-j}"
+                ;;
+            --kernel-only|-k)
+                KERNEL_ONLY=true
+                ;;
+            --release|-r)
+                AUTO_RELEASE=true
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            *)
+                warn "Unknown argument '$1' (ignored)"
+                ;;
+        esac
+        shift
+    done
+}
 
 setup_logging() {
     mkdir -p "${LOG_DIR}"
@@ -227,8 +288,11 @@ EOF
 }
 
 build_rom_package() {
-    log "Starting LineageOS ROM packaging (mka bacon)..."
-    mka bacon -j"$(nproc)" || die "LineageOS packaging failed."
+    local jobs_arg=()
+    [[ -n "${JOB_COUNT}" ]] && jobs_arg+=("-j${JOB_COUNT}")
+
+    log "Starting LineageOS ROM packaging (mka bacon ${jobs_arg[*]:-})..."
+    mka bacon "${jobs_arg[@]}" || die "LineageOS packaging failed."
     log "[+] Build completed successfully!"
     log "[+] Output images located at: ${OUT}"
 
@@ -241,11 +305,33 @@ build_rom_package() {
         fi
     fi
 
-    log "[*] To publish this build to GitHub Releases, run:"
-    log "    ./push-release.sh ${OUT}"
+    if [[ "${AUTO_RELEASE}" == "true" ]]; then
+        local push_script=""
+        if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
+            push_script="${WORKSPACE_ROOT}/push-release.sh"
+        elif [[ -x "${SCRIPT_DIR}/push-release.sh" ]]; then
+            push_script="${SCRIPT_DIR}/push-release.sh"
+        elif [[ -x "${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh" ]]; then
+            push_script="${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh"
+        elif command -v push-release.sh >/dev/null 2>&1; then
+            push_script="$(command -v push-release.sh)"
+        fi
+
+        local out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
+        if [[ -n "${push_script}" ]]; then
+            log "Triggering automatic GitHub release push via ${push_script}..."
+            "${push_script}" "${out_target}" || warn "Release upload failed or was skipped."
+        else
+            warn "Automatic release requested (-r/--release), but push-release.sh was not found or is not executable!"
+        fi
+    else
+        log "[*] To publish this build to GitHub Releases, run:"
+        log "    ./push-release.sh ${OUT:-out/target/product/${DEVICE}}"
+    fi
 }
 
 main() {
+    parse_arguments "$@"
     setup_logging
     local start_time
     start_time="$(date +%s)"
@@ -256,7 +342,12 @@ main() {
     init_android_environment
     build_inline_kernel
     build_and_stage_oot_modules
-    build_rom_package
+
+    if [[ "${KERNEL_ONLY}" == "true" ]]; then
+        log "[+] Kernel and modules built successfully (--kernel-only specified)."
+    else
+        build_rom_package
+    fi
 
     local end_time
     end_time="$(date +%s)"

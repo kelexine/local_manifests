@@ -109,7 +109,9 @@ parse_args() {
                 exit 0
                 ;;
             *)
-                if [[ -z "${PRODUCT_DIR}" && -d "$1" ]]; then
+                if [[ -z "$1" ]]; then
+                    shift
+                elif [[ -z "${PRODUCT_DIR}" && -d "$1" ]]; then
                     PRODUCT_DIR="$1"
                     shift
                 else
@@ -160,9 +162,12 @@ resolve_product_dir() {
 
     # Check well-known server paths
     local candidates=(
-        "/serverhive4/kelexine/axionos/out/target/product/marlon"
         "${WORKSPACE_ROOT}/out/target/product/marlon"
         "${WORKSPACE_ROOT}/../out/target/product/marlon"
+        "${WORKSPACE_ROOT}/../../out/target/product/marlon"
+        "${HOME}/axionos/out/target/product/marlon"
+        "${HOME}/lineage/out/target/product/marlon"
+        "/serverhive4/kelexine/axionos/out/target/product/marlon"
     )
 
     for cand in "${candidates[@]}"; do
@@ -175,6 +180,9 @@ resolve_product_dir() {
     # Try searching for product output
     local found_dir
     found_dir="$(find "${WORKSPACE_ROOT}" -maxdepth 5 -type d -path '*/out/target/product/marlon' 2>/dev/null | head -n 1 || true)"
+    if [[ -z "${found_dir}" && -d "${WORKSPACE_ROOT}/../.." ]]; then
+        found_dir="$(find "${WORKSPACE_ROOT}/../.." -maxdepth 5 -type d -path '*/out/target/product/marlon' 2>/dev/null | head -n 1 || true)"
+    fi
     if [[ -n "${found_dir}" && -d "${found_dir}" ]]; then
         PRODUCT_DIR="$(cd "${found_dir}" && pwd)"
         return 0

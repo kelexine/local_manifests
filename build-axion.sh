@@ -11,7 +11,15 @@ set -eo pipefail
 
 # --- Configuration & Paths ---
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+if [[ -f "${SCRIPT_DIR}/build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+elif [[ -f "${SCRIPT_DIR}/../../build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+elif [[ -f "$(pwd)/build/envsetup.sh" ]]; then
+    readonly WORKSPACE_ROOT="$(pwd)"
+else
+    readonly WORKSPACE_ROOT="${SCRIPT_DIR}"
+fi
 readonly DEVICE="marlon"
 
 TARGET_VARIANT="userdebug"
@@ -396,13 +404,27 @@ build_rom_package() {
     fi
 
     if [[ "${AUTO_RELEASE}" == "true" ]]; then
+        local push_script=""
         if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
-            log "Triggering automatic GitHub release push..."
-            "${WORKSPACE_ROOT}/push-release.sh" "${OUT}" || warn "Release upload failed or was skipped."
+            push_script="${WORKSPACE_ROOT}/push-release.sh"
+        elif [[ -x "${SCRIPT_DIR}/push-release.sh" ]]; then
+            push_script="${SCRIPT_DIR}/push-release.sh"
+        elif [[ -x "${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh" ]]; then
+            push_script="${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh"
+        elif command -v push-release.sh >/dev/null 2>&1; then
+            push_script="$(command -v push-release.sh)"
+        fi
+
+        local out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
+        if [[ -n "${push_script}" ]]; then
+            log "Triggering automatic GitHub release push via ${push_script}..."
+            "${push_script}" "${out_target}" || warn "Release upload failed or was skipped."
+        else
+            warn "Automatic release requested (-r/--release), but push-release.sh was not found or is not executable!"
         fi
     else
         log "[*] To publish this build to GitHub Releases, run:"
-        log "    ./push-release.sh ${OUT}"
+        log "    ./push-release.sh ${OUT:-out/target/product/${DEVICE}}"
     fi
 }
 
