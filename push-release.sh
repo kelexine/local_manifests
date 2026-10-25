@@ -331,14 +331,14 @@ generate_release_notes() {
 ### Highlights & Key Improvements
 
 - **Kernel Linux 4.19.127 Overhaul:**
-  - **Syscall 436 (\`close_range\`):** Full upstream backport including \`CLOSE_RANGE_CLOEXEC\`, \`CLOSE_RANGE_UNSHARE\`, and syzbot race fixes. Completely resolves child process cleanup and restores functional Wi-Fi Hotspot / Tethering (\`dnsmasq\`).
+  - **Syscall 436 (\`close_range\`):** Full upstream backport including \`CLOSE_RANGE_CLOEXEC\`, \`CLOSE_RANGE_UNSHARE\`, and syzbot race fixes. Resolves bionic \`posix_spawn\` failure (\`close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)\`) and restores functional Wi-Fi Hotspot / Tethering (\`dnsmasq\`).
   - **Syscall 435 (\`clone3\`):** Modern fork syscall with \`copy_struct_from_user\` framework and \`CLONE_CLEAR_SIGHAND\` support.
   - **Syscall 438 (\`pidfd_getfd\`):** Process file-descriptor duplicate and transfer mechanism.
   - **Syscall 439 (\`faccessat2\`):** Modern access validation integrated with MTK \`inode_permission2\` VFS security framework.
-  - **Syscall 440 (\`process_madvise\`):** External memory hinting API for modern Android memory daemons.
+  - **Syscall 440 (\`process_madvise\`):** External memory hinting API for modern Android memory daemons with arm64 32-bit compat plumbing.
   - **Syscall 441 (\`epoll_pwait2\`):** High-precision nanosecond epoll wait with 64-bit and compat 32-bit plumbing.
   - **Kernel Defconfig Enablements:**
-    - \`CONFIG_USERFAULTFD=y\`: Enables ART Concurrent Mark-Compact (CMC) Garbage Collector.
+    - \`CONFIG_USERFAULTFD=y\`: Enables userfaultfd subsystem for user-space page fault management.
     - \`CONFIG_MEMCG=y\` & \`CONFIG_MEMCG_SWAP=y\`: Full memory control groups for Android 15/16 memory isolation.
     - \`CONFIG_PSI=y\`: Pressure Stall Information enabled for precise \`lmkd\` low-memory management.
 
