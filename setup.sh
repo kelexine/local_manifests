@@ -364,6 +364,12 @@ if [[ -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" ]]; then
     chmod +x "${WORKSPACE_DIR}/build.sh"
 fi
 
+if [[ -f "${LOCAL_MANIFESTS_CACHE}/push-release.sh" ]]; then
+    log "Installing release script: push-release.sh -> ${WORKSPACE_DIR}/push-release.sh"
+    cp -f "${LOCAL_MANIFESTS_CACHE}/push-release.sh" "${WORKSPACE_DIR}/push-release.sh"
+    chmod +x "${WORKSPACE_DIR}/push-release.sh"
+fi
+
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
 log "Setup log saved to: ${WORKSPACE_DIR}/setup.log"
 if [[ "${ROM}" == "twrp" ]]; then
