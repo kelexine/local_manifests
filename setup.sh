@@ -67,6 +67,23 @@ log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
+install_workspace_script() {
+    local src="$1"
+    local dst="$2"
+    local label="$3"
+
+    if [[ -f "${src}" ]]; then
+        cp -f "${src}" "${dst}"
+        chmod +x "${dst}"
+        log "Installed ${label}: ${dst}"
+    elif [[ -f "${dst}" ]]; then
+        chmod +x "${dst}"
+        log "Ensured executable bit on existing ${label}: ${dst}"
+    else
+        log "No ${label} found at ${src}; leaving ${dst} untouched."
+    fi
+}
+
 setup_logging() {
     local log_dir="${WORKSPACE_DIR}/logs"
     local timestamp="$(date +'%Y%m%d_%H%M%S')"
@@ -358,17 +375,8 @@ if [[ "${ROM}" != "twrp" ]]; then
     configure_signing_keys
 fi
 
-if [[ -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" ]]; then
-    log "Installing build script: build-${ROM}.sh -> ${WORKSPACE_DIR}/build.sh"
-    cp -f "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh"
-    chmod +x "${WORKSPACE_DIR}/build.sh"
-fi
-
-if [[ -f "${LOCAL_MANIFESTS_CACHE}/push-release.sh" ]]; then
-    log "Installing release script: push-release.sh -> ${WORKSPACE_DIR}/push-release.sh"
-    cp -f "${LOCAL_MANIFESTS_CACHE}/push-release.sh" "${WORKSPACE_DIR}/push-release.sh"
-    chmod +x "${WORKSPACE_DIR}/push-release.sh"
-fi
+install_workspace_script "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh" "build script"
+install_workspace_script "${LOCAL_MANIFESTS_CACHE}/push-release.sh" "${WORKSPACE_DIR}/push-release.sh" "release script"
 
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
 log "Setup log saved to: ${WORKSPACE_DIR}/setup.log"
