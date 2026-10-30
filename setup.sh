@@ -142,7 +142,7 @@ configure_ndk_env() {
 # Kernel build environment using Android NDK ${ndk_version}
 export NDK_HOME="${ndk_dir}"
 export PATH="${ndk_dir}/toolchains/llvm/prebuilt/linux-x86_64/bin:\${PATH}"
-export TARGET_KERNEL_CLANG_PATH="${ndk_dir}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+export TARGET_KERNEL_CLANG_PATH="${ndk_dir}/toolchains/llvm/prebuilt/linux-x86_64"
 export CLANG_TRIPLE="aarch64-linux-gnu-"
 export CROSS_COMPILE="aarch64-linux-gnu-"
 export LLVM=1

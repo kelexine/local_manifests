@@ -9,9 +9,6 @@
     <!-- Cubot P50 (marlon) Kernel Source (4.19.325-cip136 MT6765 / MT6762R) -->
     <project name="kelexine/android_kernel_cubot_mt6765" path="kernel/cubot/marlon" remote="kelexine-gh" revision="marlon-cip" />
 
-    <!-- Cubot P50 (marlon) Kernel Out-Of-Tree Modules (Connectivity & MET) -->
-    <project name="kelexine/android_kernel_modules_cubot_mt6765" path="kernel/cubot/marlon-modules" remote="kelexine-gh" revision="marlon" />
-
     <!-- MediaTek Vendor Sepolicy for LineageOS 23.2 -->
     <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="kelexine-gh" revision="lineage-23.2" />
 
