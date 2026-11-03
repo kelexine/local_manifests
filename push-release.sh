@@ -344,12 +344,20 @@ generate_release_notes() {
     - \`CONFIG_MEMCG=y\` & \`CONFIG_MEMCG_SWAP=y\`: Full memory control groups for Android 15/16 memory isolation.
     - \`CONFIG_PSI=y\`: Pressure Stall Information enabled for precise \`lmkd\` low-memory management.
 
-- **Audio Subsystem & HAL Shims:**
+- **Audio & Dolby Atmos Subsystem:**
   - Resolved direct-branch linker undefined symbol in \`libshim_audio.so\` for \`audioPortConfigsToHal\`.
   - In-process Bluetooth Audio HAL provider with dynamic routing fallback.
+  - **Dolby Atmos Audio System:** Patched 64-bit DAP audio effect (\`libswdap.so\`), \`libdlbdsservice.so\`, and \`libdlbpreg.so\` dynamic linker dependencies to link against \`libstagefright_foundation-v33.so\`.
+  - Declared \`vendor.dolby.hardware.dms@2.0::IDms default\` in service init script.
+  - Granted SELinux binder permissions for \`system_app\` (\`LunarisDolby\`) to communicate with \`hal_dms\`.
 
-- **Out-of-Tree Connectivity Modules:**
-  - Compiled and staged inline via NDK r29 LLVM Clang: \`wmt_drv\`, \`wmt_chrdev_wifi\`, \`wlan_drv_gen4m\`, \`bt_drv\`, \`gps_drv\`, \`met\`.
+- **Storage & File System Stability:**
+  - Enabled \`CONFIG_FUSE_FS=y\` and \`CONFIG_CUSE=y\` in \`marlon_defconfig\` for rock-solid userspace storage virtualization.
+  - Aligned Android 16 storage parameters to eliminate dangling symlinks to \`/dev/null\` for internal storage (\`/sdcard\`).
+
+- **Kernel Toolchain & Module Compilation:**
+  - Upgraded kernel build toolchain to **Android NDK r30** (LLVM/Clang 18+).
+  - Consolidated MTK connectivity (\`wmt_drv\`, \`wmt_chrdev_wifi\`, \`wlan_drv_gen4m\`, \`bt_drv\`, \`gps_drv\`) and MET modules directly in-tree on \`marlon-cip\`.
   - Strictly sequenced in dependency order inside \`vendor.img\`'s \`modules.load\`.
 
 ---

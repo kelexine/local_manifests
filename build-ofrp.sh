@@ -18,7 +18,7 @@ INLINE_KERNEL=false
 
 readonly DEVICE_TREE_DIR="${WORKSPACE_ROOT}/device/cubot/${DEVICE}"
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
-readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r29"
+readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r30"
 readonly NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
 readonly LOG_DIR="${WORKSPACE_ROOT}/logs"
@@ -44,7 +44,7 @@ Build Variants:
 
 Options:
   -j<num>                         Job count (e.g. -j16, -j64)
-  --inline-kernel                 Compile kernel from kernel/cubot/marlon with NDK r29
+  --inline-kernel                 Compile kernel from kernel/cubot/marlon with NDK r30
   -h, --help                      Show this help message and exit
 
 Examples:
@@ -113,7 +113,7 @@ verify_prerequisites() {
     [[ -d "${DEVICE_TREE_DIR}" ]] || die "OrangeFox device tree missing at ${DEVICE_TREE_DIR}."
     if [[ "${INLINE_KERNEL}" == "true" ]]; then
         [[ -d "${KERNEL_SRC}" ]] || die "--inline-kernel requested, but kernel source missing at ${KERNEL_SRC}."
-        [[ -d "${NDK_BIN}" ]] || die "--inline-kernel requested, but NDK r29 toolchain not found at ${NDK_BIN}."
+        [[ -d "${NDK_BIN}" ]] || die "--inline-kernel requested, but NDK r30 toolchain not found at ${NDK_BIN}."
     fi
 }
 
@@ -121,7 +121,7 @@ setup_inline_kernel_env() {
     if [[ "${INLINE_KERNEL}" != "true" ]]; then
         return 0
     fi
-    log "Configuring Android NDK r29 LLVM environment for inline kernel compilation..."
+    log "Configuring Android NDK r30 LLVM environment for inline kernel compilation..."
     export PATH="${NDK_BIN}:${PATH}"
     export TARGET_KERNEL_CLANG_PATH="${NDK_BIN%/bin}"
     export TARGET_FORCE_PREBUILT_KERNEL="false"

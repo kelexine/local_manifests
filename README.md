@@ -92,8 +92,8 @@ repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
 
 All targets also pull `LineageOS/android_device_mediatek_sepolicy_vndr` (on `lineage-23.2`) into `device/mediatek/sepolicy_vndr`.
 
-### Kernel Toolchain (Android NDK r29)
-The kernel compiles with LLVM/Clang from Android NDK r29. `setup.sh` automatically downloads and verifies the NDK at `~/Android/Ndk/android-ndk-r29` and generates `${WORKSPACE_DIR}/kernel-env.sh`. Source this script before starting your ROM build to export `TARGET_KERNEL_CLANG_PATH` and LLVM cross-compilation flags.
+### Kernel Toolchain (Android NDK r30)
+The kernel compiles with LLVM/Clang from Android NDK r30. `setup.sh` automatically downloads and verifies the NDK at `~/Android/Ndk/android-ndk-r30` and generates `${WORKSPACE_DIR}/kernel-env.sh`. Source this script before starting your ROM build to export `TARGET_KERNEL_CLANG_PATH` and LLVM cross-compilation flags.
 
 ## Publishing Releases: `push-release.sh`
 

@@ -36,7 +36,7 @@ AUTO_RELEASE=false
 
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 
-readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r29"
+readonly NDK_DIR="${HOME}/Android/Ndk/android-ndk-r30"
 readonly NDK_BIN="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
 readonly LOG_DIR="${WORKSPACE_ROOT}/logs"
@@ -168,13 +168,13 @@ format_duration() {
 
 verify_prerequisites() {
     log "Verifying build prerequisites..."
-    [[ -d "${NDK_BIN}" ]] || die "NDK r29 toolchain not found at ${NDK_BIN}. Please run setup.sh first."
+    [[ -d "${NDK_BIN}" ]] || die "NDK r30 toolchain not found at ${NDK_BIN}. Please run setup.sh first."
     [[ -f "${WORKSPACE_ROOT}/build/envsetup.sh" ]] || die "Workspace root is not an Android build tree (${WORKSPACE_ROOT})."
     [[ -d "${KERNEL_SRC}" ]] || die "Kernel source missing at ${KERNEL_SRC}."
 }
 
 setup_kernel_toolchain_env() {
-    log "Configuring Android NDK r29 LLVM environment for kernel compilation..."
+    log "Configuring Android NDK r30 LLVM environment for kernel compilation..."
     export PATH="${NDK_BIN}:${PATH}"
     # BoardConfigKernel.mk appends /bin/clang to this path, so point to
     # the parent of bin/ (linux-x86_64), not bin/ itself — else we get /bin/bin/clang.

@@ -104,7 +104,7 @@ setup_logging() {
 }
 
 download_ndk() {
-    local ndk_version="r29"
+    local ndk_version="r30"
     local ndk_zip="android-ndk-${ndk_version}-linux.zip"
     local ndk_url="https://dl.google.com/android/repository/${ndk_zip}"
     local ndk_dir="${HOME}/Android/Ndk/android-ndk-${ndk_version}"
@@ -132,7 +132,7 @@ download_ndk() {
 }
 
 configure_ndk_env() {
-    local ndk_version="r29"
+    local ndk_version="r30"
     local ndk_dir="${HOME}/Android/Ndk/android-ndk-${ndk_version}"
     local env_script="${WORKSPACE_DIR}/kernel-env.sh"
 
