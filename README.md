@@ -107,7 +107,7 @@ An automated, idempotent GitHub release script is included to publish ROM builds
 - **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), optional incremental OTA zip (`*-INCREMENTAL-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), target-files baseline (`~/ota-baselines/marlon-target_files-<DATE>.zip`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
 - **Options:**
   - `-d, --dir <path>`: Target product directory.
-  - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/android_device_cubot_marlon`).
+  - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/cubot-marlon-rom-releases`).
   - `-t, --tag <tag>`: Custom tag name (auto-detected if omitted).
   - `-s, --tag-suffix <suffix>`: Optional suffix appended to auto-generated tags (e.g. `r2`).
   - `-m, --title <title>`: Custom release title.
@@ -115,16 +115,16 @@ An automated, idempotent GitHub release script is included to publish ROM builds
   - `-a, --append-notes <file>`: Append custom notes while keeping highlights and SHA-256 checksums.
   - `--fs <auto|erofs|ext4>`: Override super partition filesystem auto-detection (EROFS is default).
   - `-i, --incremental <file>`: Incremental OTA zip to attach alongside the full ROM zip.
-  - `-b, --target-files <file>`: Target-files baseline zip to track in generated `marlon.json`.
-  - `--baseline-url <url>` / `--baseline-base-url <url>`: Target-files download URL (supports SourceForge `/download` URLs) written to `marlon.json`.
+  - `-b, --target-files <file>`: Target-files baseline zip to track in generated OTA JSON (`axion.json` / `lineage.json`).
+  - `--baseline-url <url>` / `--baseline-base-url <url>`: Target-files download URL (defaults to `cubot-marlon-rom-releases` SourceForge `ota-baselines`) written to OTA JSON.
   - `--sf-dest <rsync-dest>`: Optional SourceForge FRS rsync upload target for `target-files.zip`.
   - `--split-baseline`: Split `>1900 MiB` `target-files.zip` into `<=1800 MiB` GitHub Release parts.
-  - `--ota-json-out <file>` / `--ota-json-push <git-dir>`: Generate and optionally commit/push Axion Updater `marlon.json`.
+  - `--ota-json-out <file>` / `--ota-json-push <git-dir>`: Generate and optionally commit/push Updater manifest (`axion.json` / `lineage.json`).
   - `--prerelease` / `--draft`: Mark the release as pre-release or draft.
   - `--dry-run`: Preview assets, release notes, and generated OTA JSON without uploading.
 
 ### Incremental OTA & Baseline Workflow (`build-axion.sh`)
-Pass `--incremental` (with `--ota-json <url|file>`, `--baseline-base-url`, `--sf-dest`, and `--release`) to `./build.sh` so a build automatically archives its `target-files.zip`, fetches and SHA-256-verifies the prior baseline from the OTA JSON URL on a fresh server, signs an incremental OTA via `ota_from_target_files -i`, and publishes everything together.
+Pass `--incremental` (with optional `--ota-json <url|file>`, `--sf-dest`, and `--release`) to `./build.sh` so a build automatically archives its `target-files.zip`, resolves `cubot-marlon-rom-releases/OTA/{variant}/axion.json`, fetches and SHA-256-verifies the prior baseline on a fresh server, signs an incremental OTA via `ota_from_target_files -i`, and publishes everything together.
 
 ## Contributing
 - Follow Conventional Commits: `<type>(<scope>): <summary>`

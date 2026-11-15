@@ -433,9 +433,12 @@ resolve_previous_baseline() {
         fi
     fi
 
+    local ota_variant="GMS"
+    [[ "${TARGET_GAPPS_VARIANT}" == "vanilla" ]] && ota_variant="VANILLA"
+
     local json_src="${OTA_JSON_SOURCE}"
-    if [[ -z "${json_src}" && -f "${BASELINE_DIR}/${DEVICE}.json" ]]; then
-        json_src="${BASELINE_DIR}/${DEVICE}.json"
+    if [[ -z "${json_src}" ]]; then
+        json_src="https://raw.githubusercontent.com/kelexine/cubot-marlon-rom-releases/main/OTA/${ota_variant}/axion.json"
     fi
 
     local curr_utc=""
@@ -443,7 +446,7 @@ resolve_previous_baseline() {
 
     if [[ -n "${json_src}" ]]; then
         log "Resolving previous baseline via OTA JSON: ${json_src}"
-        PREV_TARGET_FILES_ZIP="$(python3 - "${json_src}" "${BASELINE_DIR}" "${curr_utc}" <<'PY'
+        if PREV_TARGET_FILES_ZIP="$(python3 - "${json_src}" "${BASELINE_DIR}" "${curr_utc}" <<'PY'
 import hashlib, json, pathlib, subprocess, sys, urllib.request
 
 json_src, baseline_dir_str, curr_utc = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -520,14 +523,19 @@ if expected_sha and sha256_file(dst) != expected_sha:
 
 print(str(dst))
 PY
-)" || die "Failed resolving baseline from OTA JSON (${json_src})."
-
-        if [[ "${PREV_TARGET_FILES_ZIP}" == "SAME_BUILD" ]]; then
-            warn "OTA JSON points to the exact same build timestamp (${curr_utc}); skipping incremental OTA."
+)"; then
+            if [[ "${PREV_TARGET_FILES_ZIP}" == "SAME_BUILD" ]]; then
+                warn "OTA JSON points to the exact same build timestamp (${curr_utc}); skipping incremental OTA."
+                PREV_TARGET_FILES_ZIP=""
+                return 0
+            fi
+            [[ -n "${PREV_TARGET_FILES_ZIP}" ]] && return 0
+        elif [[ -n "${OTA_JSON_SOURCE}" ]]; then
+            die "Failed resolving baseline from explicit OTA JSON (${json_src})."
+        else
+            warn "Could not resolve default remote OTA JSON (${json_src}); falling back to local ${BASELINE_DIR} cache."
             PREV_TARGET_FILES_ZIP=""
-            return 0
         fi
-        [[ -n "${PREV_TARGET_FILES_ZIP}" ]] && return 0
     fi
 
     # Offline cache fallback: pick newest other target-files zip in BASELINE_DIR

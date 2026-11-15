@@ -23,7 +23,7 @@ die()   { error "$*"; exit 1; }
 # --- Defaults ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="${SCRIPT_DIR}"
-DEFAULT_REPO="kelexine/android_device_cubot_marlon"
+DEFAULT_REPO="kelexine/cubot-marlon-rom-releases"
 TARGET_REPO="${DEFAULT_REPO}"
 PRODUCT_DIR=""
 CUSTOM_TAG=""
@@ -38,7 +38,7 @@ INCREMENTAL_ZIP=""
 TARGET_FILES_ARG=""
 TARGET_FILES_ZIP=""
 BASELINE_URL="${OTA_BASELINE_URL:-}"
-BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-}"
+BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-https://sourceforge.net/projects/cubot-marlon-rom-releases/files/ota-baselines}"
 SF_DEST="${OTA_SF_DEST:-}"
 SPLIT_BASELINE=false
 OTA_JSON_OUT=""
@@ -59,7 +59,7 @@ Usage:
 
 Options:
   -d, --dir <path>             Path to product output directory containing built images.
-  -r, --repo <owner/repo>      GitHub repository (default: kelexine/android_device_cubot_marlon).
+  -r, --repo <owner/repo>      GitHub repository (default: kelexine/cubot-marlon-rom-releases).
   -t, --tag <tag>              Explicit release tag name (e.g. v2.9-20261115 or v2.9-20261115-r2).
   -s, --tag-suffix <suffix>    Append suffix to auto-generated tag (e.g. r2, test).
   -m, --title <title>          Release title heading.
@@ -750,14 +750,19 @@ upload_baseline_sourceforge() {
 write_ota_json() {
     [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]] || return 0
 
-    local json_out="${OTA_JSON_OUT:-${PRODUCT_DIR}/marlon.json}"
+    local json_filename="marlon.json"
+    case "${ROM_FLAVOR}" in
+        AxionOS) json_filename="axion.json" ;;
+        LineageOS) json_filename="lineage.json" ;;
+    esac
+    local json_out="${OTA_JSON_OUT:-${PRODUCT_DIR}/${json_filename}}"
     local parts_joined=""
     if [[ ${#SPLIT_PARTS[@]} -gt 0 ]]; then
         parts_joined="$(printf '%s\n' "${SPLIT_PARTS[@]}")"
     fi
 
     local resolved_tf_url="${BASELINE_URL}"
-    if [[ -z "${resolved_tf_url}" && -n "${BASELINE_BASE_URL}" && -n "${TARGET_FILES_ZIP}" ]]; then
+    if [[ -z "${resolved_tf_url}" && "${SPLIT_BASELINE}" != "true" && -n "${BASELINE_BASE_URL}" && -n "${TARGET_FILES_ZIP}" ]]; then
         local tf_name
         tf_name="$(basename "${TARGET_FILES_ZIP}")"
         if [[ "${BASELINE_BASE_URL}" == *"sourceforge.net"* ]]; then
@@ -878,9 +883,9 @@ PY
     printf '%s\n' "${json_payload}" > "${json_out}"
     log "[+] Wrote Axion OTA JSON: ${json_out}"
 
-    if [[ -d "${HOME}/ota-baselines" && "$(cd "$(dirname "${json_out}")" && pwd)/$(basename "${json_out}")" != "${HOME}/ota-baselines/marlon.json" ]]; then
-        printf '%s\n' "${json_payload}" > "${HOME}/ota-baselines/marlon.json"
-        log "[+] Mirrored OTA JSON: ${HOME}/ota-baselines/marlon.json"
+    if [[ -d "${HOME}/ota-baselines" && "$(cd "$(dirname "${json_out}")" && pwd)/$(basename "${json_out}")" != "${HOME}/ota-baselines/${json_filename}" ]]; then
+        printf '%s\n' "${json_payload}" > "${HOME}/ota-baselines/${json_filename}"
+        log "[+] Mirrored OTA JSON: ${HOME}/ota-baselines/${json_filename}"
     fi
 
     if [[ -n "${OTA_JSON_PUSH_DIR}" ]]; then
@@ -890,7 +895,7 @@ PY
         [[ -n "${rel_json}" && "${rel_json}" != ../* ]] || die "--ota-json-out (${json_out}) must be inside --ota-json-push (${OTA_JSON_PUSH_DIR})."
         if ! git -C "${OTA_JSON_PUSH_DIR}" diff --quiet -- "${rel_json}" || [[ -n "$(git -C "${OTA_JSON_PUSH_DIR}" status --porcelain -- "${rel_json}")" ]]; then
             git -C "${OTA_JSON_PUSH_DIR}" add "${rel_json}"
-            git -C "${OTA_JSON_PUSH_DIR}" commit -s -m "ota(marlon): update ${RELEASE_TAG} release JSON"
+            git -C "${OTA_JSON_PUSH_DIR}" commit -s -m "ota(axion): update ${RELEASE_TAG} release JSON"
             git -C "${OTA_JSON_PUSH_DIR}" push
             log "[+] Committed and pushed updated OTA JSON in ${OTA_JSON_PUSH_DIR}"
         else
