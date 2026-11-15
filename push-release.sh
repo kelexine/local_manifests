@@ -12,11 +12,11 @@
 #   - If missing: creates tag and release cleanly.
 #   - Recomputes or validates SHA256 checksums automatically.
 
-set -eo pipefail
+set -euo pipefail
 
 # --- Color formatting helpers ---
 log()   { printf '\033[1;32m[push-release]\033[0m %s\n' "$*"; }
-warn()  { printf '\033[1;33m[push-release]\033[0m %s\n' "$*"; }
+warn()  { printf '\033[1;33m[push-release]\033[0m %s\n' "$*" >&2; }
 error() { printf '\033[1;31m[push-release]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
@@ -27,8 +27,12 @@ DEFAULT_REPO="kelexine/android_device_cubot_marlon"
 TARGET_REPO="${DEFAULT_REPO}"
 PRODUCT_DIR=""
 CUSTOM_TAG=""
+TAG_SUFFIX=""
 CUSTOM_TITLE=""
 CUSTOM_NOTES_FILE=""
+EXTRA_NOTES_FILE=""
+FS_OVERRIDE="auto"
+DETECTED_FS="unknown"
 IS_DRAFT=false
 IS_PRERELEASE=false
 DRY_RUN=false
@@ -45,9 +49,14 @@ Usage:
 Options:
   -d, --dir <path>          Path to product output directory containing built images.
   -r, --repo <owner/repo>   GitHub repository (default: kelexine/android_device_cubot_marlon).
-  -t, --tag <tag>           Explicit release tag name (e.g. v2.9-20261024 or v2.9-20261024-r2).
+  -t, --tag <tag>           Explicit release tag name (e.g. v2.9-20261115 or v2.9-20261115-erofs).
+  -s, --tag-suffix <suffix> Append suffix to auto-generated tag (e.g. erofs, r2). Auto-set to
+                            'erofs' when an EROFS build is detected unless -t is given.
   -m, --title <title>       Release title heading.
-  -n, --notes <file>        Custom markdown file to use as release notes.
+  -n, --notes <file>        Custom markdown file to replace the entire release body.
+  -a, --append-notes <file> Append custom markdown notes while preserving generated highlights
+                            and the SHA-256 asset checksums table.
+      --fs <auto|erofs|ext4> Override super partition filesystem detection (default: auto).
       --draft               Publish as a draft release.
       --prerelease          Mark as pre-release.
       --dry-run             Simulate asset discovery and notes generation without uploading.
@@ -57,7 +66,7 @@ Discovery:
   If --dir is omitted, push-release.sh checks in order:
     1. $ANDROID_PRODUCT_OUT / $OUT
     2. Current working directory
-    3. /serverhive4/kelexine/axionos/out/target/product/marlon
+    3. ${HOME}/axionos/out/target/product/marlon
     4. ${WORKSPACE_ROOT}/out/target/product/marlon
     5. Glob match for out/target/product/marlon
 EOF
@@ -82,6 +91,11 @@ parse_args() {
                 CUSTOM_TAG="$2"
                 shift 2
                 ;;
+            -s|--tag-suffix)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                TAG_SUFFIX="${2#-}"
+                shift 2
+                ;;
             -m|--title)
                 [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
                 CUSTOM_TITLE="$2"
@@ -90,6 +104,19 @@ parse_args() {
             -n|--notes)
                 [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
                 CUSTOM_NOTES_FILE="$2"
+                shift 2
+                ;;
+            -a|--append-notes)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                EXTRA_NOTES_FILE="$2"
+                shift 2
+                ;;
+            --fs)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                case "$2" in
+                    auto|erofs|ext4) FS_OVERRIDE="$2" ;;
+                    *) die "Invalid --fs value '$2' (expected auto, erofs, or ext4)." ;;
+                esac
                 shift 2
                 ;;
             --draft)
@@ -167,7 +194,6 @@ resolve_product_dir() {
         "${WORKSPACE_ROOT}/../../out/target/product/marlon"
         "${HOME}/axionos/out/target/product/marlon"
         "${HOME}/lineage/out/target/product/marlon"
-        "/serverhive4/kelexine/axionos/out/target/product/marlon"
     )
 
     for cand in "${candidates[@]}"; do
@@ -282,29 +308,98 @@ collect_assets() {
     done
 }
 
+# Detect super partition filesystem type (erofs vs ext4)
+detect_filesystem() {
+    if [[ "${FS_OVERRIDE}" != "auto" ]]; then
+        DETECTED_FS="${FS_OVERRIDE}"
+        return 0
+    fi
+
+    local probe_img=""
+    for candidate in "system.img" "vendor.img" "product.img"; do
+        if [[ -f "${PRODUCT_DIR}/${candidate}" ]]; then
+            probe_img="${PRODUCT_DIR}/${candidate}"
+            break
+        fi
+    done
+
+    if [[ -n "${probe_img}" ]]; then
+        local magic=""
+        magic="$(od -An -tx1 -j 1024 -N 4 "${probe_img}" 2>/dev/null | tr -d ' \n' || true)"
+        if [[ "${magic}" == "e2e1f5e0" ]]; then
+            DETECTED_FS="erofs"
+            return 0
+        fi
+        if command -v file >/dev/null 2>&1; then
+            local file_desc=""
+            file_desc="$(file -b "${probe_img}" 2>/dev/null || true)"
+            if [[ "${file_desc}" == *"EROFS"* ]]; then
+                DETECTED_FS="erofs"
+                return 0
+            elif [[ "${file_desc}" == *"ext4"* || "${file_desc}" == *"ext2"* ]]; then
+                DETECTED_FS="ext4"
+                return 0
+            fi
+        fi
+        DETECTED_FS="ext4"
+        return 0
+    fi
+
+    local fstab_path="${PRODUCT_DIR}/vendor/etc/fstab.mt6765"
+    if [[ -f "${fstab_path}" ]]; then
+        local first_fs=""
+        first_fs="$(awk '$1 == "system" && $2 == "/system" {print $3; exit}' "${fstab_path}" 2>/dev/null || true)"
+        if [[ "${first_fs}" == "erofs" || "${first_fs}" == "ext4" ]]; then
+            DETECTED_FS="${first_fs}"
+            return 0
+        fi
+    fi
+
+    DETECTED_FS="unknown"
+}
+
 # Resolve release tag and title
 resolve_release_info() {
+    detect_filesystem
+
     if [[ -n "${CUSTOM_TAG}" ]]; then
         RELEASE_TAG="${CUSTOM_TAG}"
-    elif [[ -n "${BUILD_TAG_SUGGESTION}" ]]; then
-        RELEASE_TAG="${BUILD_TAG_SUGGESTION}"
     else
-        RELEASE_TAG="v2.9-$(date +%Y%m%d)"
+        if [[ -n "${BUILD_TAG_SUGGESTION}" ]]; then
+            RELEASE_TAG="${BUILD_TAG_SUGGESTION}"
+        else
+            RELEASE_TAG="v2.9-$(date +%Y%m%d)"
+        fi
+
+        local effective_suffix="${TAG_SUFFIX}"
+        if [[ -z "${effective_suffix}" && "${DETECTED_FS}" == "erofs" ]]; then
+            effective_suffix="erofs"
+        fi
+        if [[ -n "${effective_suffix}" ]]; then
+            RELEASE_TAG="${RELEASE_TAG}-${effective_suffix}"
+        fi
+    fi
+
+    local fs_badge=""
+    if [[ "${DETECTED_FS}" == "erofs" ]]; then
+        fs_badge=" [EROFS]"
     fi
 
     if [[ -n "${CUSTOM_TITLE}" ]]; then
         RELEASE_TITLE="${CUSTOM_TITLE}"
     elif [[ "${ROM_FLAVOR}" == "AxionOS" ]]; then
-        RELEASE_TITLE="AxionOS ${ROM_VERSION:-2.9} (NOESIS) – UNOFFICIAL for Cubot P50 (marlon)"
+        RELEASE_TITLE="AxionOS ${ROM_VERSION:-2.9} (NOESIS)${fs_badge} – UNOFFICIAL for Cubot P50 (marlon)"
     elif [[ "${ROM_FLAVOR}" == "LineageOS" ]]; then
-        RELEASE_TITLE="LineageOS ${ROM_VERSION:-23.2} – UNOFFICIAL for Cubot P50 (marlon)"
+        RELEASE_TITLE="LineageOS ${ROM_VERSION:-23.2}${fs_badge} – UNOFFICIAL for Cubot P50 (marlon)"
     else
-        RELEASE_TITLE="Custom ROM Build for Cubot P50 (marlon) - ${RELEASE_TAG}"
+        RELEASE_TITLE="Custom ROM Build${fs_badge} for Cubot P50 (marlon) - ${RELEASE_TAG}"
     fi
 
     log "Target Repository: ${TARGET_REPO}"
+    log "Filesystem:        ${DETECTED_FS}"
     log "Release Tag:       ${RELEASE_TAG}"
     log "Release Title:     ${RELEASE_TITLE}"
+    log "Pre-release:       ${IS_PRERELEASE}"
 }
 
 # Generate rich markdown release notes
@@ -318,19 +413,27 @@ generate_release_notes() {
         return 0
     fi
 
+    local fs_display="ext4"
+    if [[ "${DETECTED_FS}" == "erofs" ]]; then
+        fs_display="EROFS (\`lz4hc,9\`, 256KiB pcluster) + \`ext4\` fallback"
+    elif [[ "${DETECTED_FS}" == "unknown" ]]; then
+        fs_display="N/A"
+    fi
+
     cat <<EOF > "${NOTES_TMP}"
 ### ${RELEASE_TITLE}
 
 **Device:** Cubot P50 (\`marlon\`)
 **Platform:** MediaTek MT6765 / MT6762 (Helio P35)
 **Release Tag:** \`${RELEASE_TAG}\`
+**Filesystem:** ${fs_display}
 **Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
 
 ---
 
 ### Highlights & Key Improvements
 
-- **Kernel Linux 4.19.127 Overhaul:**
+- **Kernel Linux 4.19.325 (CIP SLTS) Overhaul:**
   - **Syscall 436 (\`close_range\`):** Full upstream backport including \`CLOSE_RANGE_CLOEXEC\`, \`CLOSE_RANGE_UNSHARE\`, and syzbot race fixes. Resolves bionic \`posix_spawn\` failure (\`close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)\`) and restores functional Wi-Fi Hotspot / Tethering (\`dnsmasq\`).
   - **Syscall 435 (\`clone3\`):** Modern fork syscall with \`copy_struct_from_user\` framework and \`CLONE_CLEAR_SIGHAND\` support.
   - **Syscall 438 (\`pidfd_getfd\`):** Process file-descriptor duplicate and transfer mechanism.
@@ -340,25 +443,52 @@ generate_release_notes() {
   - **Memory Management & ART CMC GC Support:**
     - **Syscall \`mremap(MREMAP_DONTUNMAP)\`:** Upstream backport for anonymous and shared memory (memfd/shmem), allowing Java heap physical pages to be remapped without unmapping the virtual address space.
     - **Userfaultfd Minor Faults (\`UFFDIO_CONTINUE\`):** Backported minor-fault registration (\`UFFDIO_REGISTER_MODE_MINOR\`) and continuation ioctl (\`UFFDIO_CONTINUE\`) for hugetlbfs and shmem, satisfying the kernel prerequisites for Android Runtime (ART) Concurrent Mark-Compact (CMC) Garbage Collection.
-    - \`CONFIG_USERFAULTFD=y\`: Enables userfaultfd subsystem and \`HAVE_ARCH_USERFAULTFD_MINOR\`.
-    - \`CONFIG_MEMCG=y\` & \`CONFIG_MEMCG_SWAP=y\`: Full memory control groups for Android 15/16 memory isolation.
-    - \`CONFIG_PSI=y\`: Pressure Stall Information enabled for precise \`lmkd\` low-memory management.
+    - \`CONFIG_USERFAULTFD=y\`, \`CONFIG_MEMCG=y\`, \`CONFIG_MEMCG_SWAP=y\`, and \`CONFIG_PSI=y\` enabled for modern Android 15/16 memory isolation and \`lmkd\` pressure tracking.
+
+- **Performance Profile HAL (\`Encore\`):**
+  - Integrated frozen \`vendor.cubot.hardware.encore\` AIDL v1 service with VINTF manifest fragment and compatibility matrix.
+  - Wired MT6765/MT6762 CPU/GPU OPP table telemetry, GED inverse level control, and FPSGO scheduling toggles with dedicated \`encore.te\` SELinux policy.
+
+- **Gestures & Input (\`DT2W\` / \`KeyHandler\`):**
+  - Added \`MarlonKeyHandler\` with \`overlay-lineage\` RRO config (\`config_device_supports_double_tap\`), \`mtk-tpd.kl\` wake key mapping, and \`DoubleTapToWakeController\` sync against \`Settings.Secure.DOUBLE_TAP_TO_WAKE\`.
+  - Enabled lockscreen-safe wake, torch (\`TorchCallback\`), and camera keyguard launch actions via \`ActionUtils\`.
 
 - **Audio & Dolby Atmos Subsystem:**
   - Resolved direct-branch linker undefined symbol in \`libshim_audio.so\` for \`audioPortConfigsToHal\`.
   - In-process Bluetooth Audio HAL provider with dynamic routing fallback.
   - **Dolby Atmos Audio System:** Patched 64-bit DAP audio effect (\`libswdap.so\`), \`libdlbdsservice.so\`, and \`libdlbpreg.so\` dynamic linker dependencies to link against \`libstagefright_foundation-v33.so\`.
-  - Declared \`vendor.dolby.hardware.dms@2.0::IDms default\` in service init script.
-  - Granted SELinux binder permissions for \`system_app\` (\`LunarisDolby\`) to communicate with \`hal_dms\`.
+  - Declared \`vendor.dolby.hardware.dms@2.0::IDms default\` in service init script and granted SELinux binder permissions for \`system_app\` (\`LunarisDolby\`) to communicate with \`hal_dms\`.
 
 - **Storage & File System Stability:**
   - Enabled \`CONFIG_FUSE_FS=y\` and \`CONFIG_CUSE=y\` in \`marlon_defconfig\` for rock-solid userspace storage virtualization.
   - Aligned Android 16 storage parameters to eliminate dangling symlinks to \`/dev/null\` for internal storage (\`/sdcard\`).
+EOF
+
+    if [[ "${DETECTED_FS}" == "erofs" ]]; then
+        cat <<'EOF' >> "${NOTES_TMP}"
+
+- **EROFS Dynamic Partitions (`test/erofs`):**
+  - Switched read-only dynamic super partitions (`system`, `vendor`, `product`) from `ext4` to **EROFS** (`lz4hc,9`, `BOARD_EROFS_PCLUSTER_SIZE := 262144`) to reduce uncompressed super-partition image footprints.
+  - Retained secondary `ext4` fallback entries in `fstab.mt6765` and `fstab.mt6762`.
+  - Uses kernel `4.19.325` supported EROFS features (`sb_csum`, `mtime`, `0padding`, `compr_cfgs`, `big_pcluster`) — `LZMA`, `CHUNKED_FILE`, `ZTAILPACKING`, and `FRAGMENTS` are omitted to match kernel `4.19` `EROFS_ALL_FEATURE_INCOMPAT`.
+EOF
+    fi
+
+    cat <<EOF >> "${NOTES_TMP}"
 
 - **Kernel Toolchain & Module Compilation:**
-  - Upgraded kernel build toolchain to **Android NDK r30** (LLVM/Clang 18+).
-  - Consolidated MTK connectivity (\`wmt_drv\`, \`wmt_chrdev_wifi\`, \`wlan_drv_gen4m\`, \`bt_drv\`, \`gps_drv\`) and MET modules directly in-tree on \`marlon-cip\`.
-  - Strictly sequenced in dependency order inside \`vendor.img\`'s \`modules.load\`.
+  - Built with **Android NDK r30** (LLVM/Clang).
+  - Consolidated MTK connectivity (\`wmt_drv\`, \`wmt_chrdev_wifi\`, \`wlan_drv_gen4m\`, \`bt_drv\`, \`gps_drv\`) and MET modules directly in-tree on \`marlon-cip\`, sequenced in \`vendor.img\`'s \`modules.load\`.
+EOF
+
+    if [[ -n "${EXTRA_NOTES_FILE}" ]]; then
+        [[ -f "${EXTRA_NOTES_FILE}" ]] || die "Extra notes file not found: ${EXTRA_NOTES_FILE}"
+        printf '\n---\n\n' >> "${NOTES_TMP}"
+        cat "${EXTRA_NOTES_FILE}" >> "${NOTES_TMP}"
+        printf '\n' >> "${NOTES_TMP}"
+    fi
+
+    cat <<EOF >> "${NOTES_TMP}"
 
 ---
 
@@ -414,8 +544,11 @@ EOF
 publish_release() {
     if [[ "${DRY_RUN}" == "true" ]]; then
         log "[DRY-RUN] Would publish to GitHub repository: ${TARGET_REPO}"
+        log "[DRY-RUN] Filesystem:    ${DETECTED_FS}"
         log "[DRY-RUN] Release Tag:   ${RELEASE_TAG}"
         log "[DRY-RUN] Release Title: ${RELEASE_TITLE}"
+        log "[DRY-RUN] Pre-release:   ${IS_PRERELEASE}"
+        log "[DRY-RUN] Draft:         ${IS_DRAFT}"
         log "[DRY-RUN] Generated Release Notes:"
         printf '%s\n' '--------------------------------------------------'
         cat "${NOTES_TMP}"
@@ -437,7 +570,7 @@ publish_release() {
 
     if [[ "${release_exists}" == "true" ]]; then
         log "Release '${RELEASE_TAG}' already exists. Updating notes and uploading assets (idempotent update)..."
-        
+
         gh release edit "${RELEASE_TAG}" \
             -R "${TARGET_REPO}" \
             --title "${RELEASE_TITLE}" \
@@ -458,7 +591,7 @@ publish_release() {
             -R "${TARGET_REPO}" \
             --title "${RELEASE_TITLE}" \
             --notes-file "${NOTES_TMP}" \
-            "${extra_flags[@]}" \
+            ${extra_flags[@]+"${extra_flags[@]}"} \
             "${UPLOAD_FILES[@]}"
     fi
 

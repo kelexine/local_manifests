@@ -109,7 +109,12 @@ An automated, idempotent GitHub release script is included to publish ROM builds
   - `-d, --dir <path>`: Target product directory.
   - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/android_device_cubot_marlon`).
   - `-t, --tag <tag>`: Custom tag name (auto-detected if omitted).
+  - `-s, --tag-suffix <suffix>`: Append tag suffix (defaults to `erofs` automatically when EROFS images are detected).
   - `-m, --title <title>`: Custom release title.
+  - `-n, --notes <file>`: Custom markdown file replacing the release body.
+  - `-a, --append-notes <file>`: Append custom notes while keeping highlights and SHA-256 checksums.
+  - `--fs <auto|erofs|ext4>`: Override super partition filesystem auto-detection.
+  - `--prerelease` / `--draft`: Mark the release as pre-release or draft.
   - `--dry-run`: Preview assets and release notes without uploading.
 
 Alternatively, pass `--release` directly to `./build-axion.sh` to upload automatically upon a successful build.
