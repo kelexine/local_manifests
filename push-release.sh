@@ -33,10 +33,21 @@ CUSTOM_NOTES_FILE=""
 EXTRA_NOTES_FILE=""
 FS_OVERRIDE="auto"
 DETECTED_FS="unknown"
+INCREMENTAL_ZIP_ARG=""
+INCREMENTAL_ZIP=""
+TARGET_FILES_ARG=""
+TARGET_FILES_ZIP=""
+BASELINE_URL="${OTA_BASELINE_URL:-}"
+BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-}"
+SF_DEST="${OTA_SF_DEST:-}"
+SPLIT_BASELINE=false
+OTA_JSON_OUT=""
+OTA_JSON_PUSH_DIR=""
 IS_DRAFT=false
 IS_PRERELEASE=false
 DRY_RUN=false
 FORCE_CLOBBER=true
+SPLIT_PARTS=()
 
 # Display usage instructions
 show_help() {
@@ -47,20 +58,27 @@ Usage:
   ./push-release.sh [options] [product-out-directory]
 
 Options:
-  -d, --dir <path>          Path to product output directory containing built images.
-  -r, --repo <owner/repo>   GitHub repository (default: kelexine/android_device_cubot_marlon).
-  -t, --tag <tag>           Explicit release tag name (e.g. v2.9-20261115 or v2.9-20261115-erofs).
-  -s, --tag-suffix <suffix> Append suffix to auto-generated tag (e.g. erofs, r2). Auto-set to
-                            'erofs' when an EROFS build is detected unless -t is given.
-  -m, --title <title>       Release title heading.
-  -n, --notes <file>        Custom markdown file to replace the entire release body.
-  -a, --append-notes <file> Append custom markdown notes while preserving generated highlights
-                            and the SHA-256 asset checksums table.
-      --fs <auto|erofs|ext4> Override super partition filesystem detection (default: auto).
-      --draft               Publish as a draft release.
-      --prerelease          Mark as pre-release.
-      --dry-run             Simulate asset discovery and notes generation without uploading.
-  -h, --help                Show this help message.
+  -d, --dir <path>             Path to product output directory containing built images.
+  -r, --repo <owner/repo>      GitHub repository (default: kelexine/android_device_cubot_marlon).
+  -t, --tag <tag>              Explicit release tag name (e.g. v2.9-20261115 or v2.9-20261115-r2).
+  -s, --tag-suffix <suffix>    Append suffix to auto-generated tag (e.g. r2, test).
+  -m, --title <title>          Release title heading.
+  -n, --notes <file>           Custom markdown file to replace the entire release body.
+  -a, --append-notes <file>    Append custom markdown notes while preserving generated highlights
+                               and the SHA-256 asset checksums table.
+      --fs <auto|erofs|ext4>   Override super partition filesystem detection (default: auto).
+  -i, --incremental <file>     Incremental OTA zip (auto-discovered in product dir if omitted).
+  -b, --target-files <file>    Target-files baseline zip (auto-checks ~/ota-baselines/).
+      --baseline-url <url>     Explicit download URL for target_files in generated marlon.json.
+      --baseline-base-url <u>  Base URL directory used to construct target_files.url (SourceForge-aware).
+      --sf-dest <rsync-dest>   Optional SourceForge FRS rsync target for target-files.zip + .sha256.
+      --split-baseline         Split >1900MiB target-files.zip into <=1800MiB GitHub Release parts.
+      --ota-json-out <file>    Output path for Axion Updater marlon.json (default: <product-dir>/marlon.json).
+      --ota-json-push <dir>    Git checkout containing --ota-json-out to commit (-s) & push automatically.
+      --draft                  Publish as a draft release.
+      --prerelease             Mark as pre-release.
+      --dry-run                Simulate asset discovery, notes, and JSON generation without uploading.
+  -h, --help                   Show this help message.
 
 Discovery:
   If --dir is omitted, push-release.sh checks in order:
@@ -117,6 +135,45 @@ parse_args() {
                     auto|erofs|ext4) FS_OVERRIDE="$2" ;;
                     *) die "Invalid --fs value '$2' (expected auto, erofs, or ext4)." ;;
                 esac
+                shift 2
+                ;;
+            -i|--incremental)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                INCREMENTAL_ZIP_ARG="$2"
+                shift 2
+                ;;
+            -b|--target-files)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                TARGET_FILES_ARG="$2"
+                shift 2
+                ;;
+            --baseline-url)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                BASELINE_URL="$2"
+                shift 2
+                ;;
+            --baseline-base-url)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                BASELINE_BASE_URL="$2"
+                shift 2
+                ;;
+            --sf-dest)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                SF_DEST="$2"
+                shift 2
+                ;;
+            --split-baseline)
+                SPLIT_BASELINE=true
+                shift
+                ;;
+            --ota-json-out)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                OTA_JSON_OUT="$2"
+                shift 2
+                ;;
+            --ota-json-push)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                OTA_JSON_PUSH_DIR="$2"
                 shift 2
                 ;;
             --draft)
@@ -244,8 +301,9 @@ collect_assets() {
     local zip_candidates=()
     while IFS= read -r z; do
         [[ -n "${z}" ]] && zip_candidates+=("${z}")
-    done < <(find . -maxdepth 1 -type f \( -name "axion-*.zip" -o -name "lineage-*.zip" -o -name "ofrp-*.zip" -o -name "twrp-*.zip" \) ! -name "*-ota.zip" -printf "%f\n" | sort -r)
+    done < <(find . -maxdepth 1 -type f \( -name "axion-*.zip" -o -name "lineage-*.zip" -o -name "ofrp-*.zip" -o -name "twrp-*.zip" \) ! -name "*-ota.zip" ! -name "*-INCREMENTAL-*.zip" -printf "%f\n" | sort -r)
 
+    ROM_TYPE_TAG="UNOFFICIAL"
     if [[ ${#zip_candidates[@]} -gt 0 ]]; then
         PRIMARY_ZIP="${zip_candidates[0]}"
         log "Found primary ROM zip: ${PRIMARY_ZIP}"
@@ -257,6 +315,9 @@ collect_assets() {
             local codename="${BASH_REMATCH[2]}"
             BUILD_DATE="${BASH_REMATCH[3]}"
             BUILD_TAG_SUGGESTION="v${ROM_VERSION}-${BUILD_DATE}"
+            if [[ "${BASH_REMATCH[4]}" =~ ^(OFFICIAL|UNOFFICIAL|COMMUNITY)- ]]; then
+                ROM_TYPE_TAG="${BASH_REMATCH[1]}"
+            fi
         elif [[ "${PRIMARY_ZIP}" =~ lineage-([0-9.]+)-([0-9]{8})-(.*)\.zip ]]; then
             ROM_FLAVOR="LineageOS"
             ROM_VERSION="${BASH_REMATCH[1]}"
@@ -265,6 +326,65 @@ collect_assets() {
         fi
     else
         warn "No ROM zip (axion-*.zip / lineage-*.zip) found in ${PRODUCT_DIR}. Proceeding with partition images only."
+    fi
+
+    # 1b. Detect or resolve incremental OTA zip
+    INCREMENTAL_ZIP=""
+    if [[ -n "${INCREMENTAL_ZIP_ARG}" ]]; then
+        [[ -f "${INCREMENTAL_ZIP_ARG}" ]] || die "Incremental zip not found: ${INCREMENTAL_ZIP_ARG}"
+        local incr_base
+        incr_base="$(basename "${INCREMENTAL_ZIP_ARG}")"
+        if [[ "$(cd "$(dirname "${INCREMENTAL_ZIP_ARG}")" && pwd)/${incr_base}" != "${PRODUCT_DIR}/${incr_base}" ]]; then
+            cp -f "${INCREMENTAL_ZIP_ARG}" "./${incr_base}"
+        fi
+        INCREMENTAL_ZIP="${incr_base}"
+    else
+        local incr_candidate=""
+        incr_candidate="$(find . -maxdepth 1 -type f \( -name "axion-*-INCREMENTAL-*.zip" -o -name "lineage-*-INCREMENTAL-*.zip" \) -printf "%f\n" | sort -r | head -n 1 || true)"
+        [[ -n "${incr_candidate}" ]] && INCREMENTAL_ZIP="${incr_candidate}"
+    fi
+    if [[ -n "${INCREMENTAL_ZIP}" ]]; then
+        log "Found incremental OTA zip: ${INCREMENTAL_ZIP}"
+        UPLOAD_FILES+=("${INCREMENTAL_ZIP}")
+    fi
+
+    # 1c. Resolve target-files baseline zip (for JSON metadata / optional split or SF upload)
+    TARGET_FILES_ZIP=""
+    if [[ -n "${TARGET_FILES_ARG}" ]]; then
+        [[ -f "${TARGET_FILES_ARG}" ]] || die "Target-files zip not found: ${TARGET_FILES_ARG}"
+        TARGET_FILES_ZIP="$(cd "$(dirname "${TARGET_FILES_ARG}")" && pwd)/$(basename "${TARGET_FILES_ARG}")"
+    elif [[ -n "${BUILD_DATE}" && -f "${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip" ]]; then
+        TARGET_FILES_ZIP="${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip"
+    fi
+
+    SPLIT_PARTS=()
+    if [[ -n "${TARGET_FILES_ZIP}" && "${SPLIT_BASELINE}" == "true" ]]; then
+        local tf_bytes
+        tf_bytes="$(stat -c%s "${TARGET_FILES_ZIP}")"
+        local tf_base
+        tf_base="$(basename "${TARGET_FILES_ZIP}")"
+        if (( tf_bytes <= 1992294400 )); then
+            if [[ "${DRY_RUN}" == "true" ]]; then
+                log "[DRY-RUN] Would attach single target-files asset: ${tf_base}"
+            else
+                if [[ "$(dirname "${TARGET_FILES_ZIP}")" != "${PRODUCT_DIR}" ]]; then
+                    cp -f "${TARGET_FILES_ZIP}" "./${tf_base}"
+                fi
+                UPLOAD_FILES+=("${tf_base}")
+            fi
+        elif [[ "${DRY_RUN}" == "true" ]]; then
+            local est_parts=$(( (tf_bytes + 1887436800 - 1) / 1887436800 ))
+            log "[DRY-RUN] Would split ${tf_base} ($(human_size "${TARGET_FILES_ZIP}")) into ~${est_parts} <=1.8GiB GitHub asset parts."
+        else
+            log "Splitting ${tf_base} ($(human_size "${TARGET_FILES_ZIP}")) into <=1.8GiB GitHub asset parts..."
+            rm -f "./${tf_base}.part-"*
+            split -b 1800M --additional-suffix="" "${TARGET_FILES_ZIP}" "./${tf_base}.part-"
+            while IFS= read -r part; do
+                [[ -n "${part}" ]] || continue
+                SPLIT_PARTS+=("$(basename "${part}")")
+                UPLOAD_FILES+=("$(basename "${part}")")
+            done < <(find . -maxdepth 1 -type f -name "${tf_base}.part-*" | sort)
+        fi
     fi
 
     # 2. Partition images
@@ -292,9 +412,9 @@ collect_assets() {
         sha="$(sha256sum "${f}" | awk '{print $1}')"
         printf "%s  %s\n" "${sha}" "${f}" >> "${sums_file}"
 
-        # If primary zip, ensure .sha256 file exists alongside it
-        if [[ "${f}" == "${PRIMARY_ZIP}" ]]; then
-            local zip_sha_file="${PRIMARY_ZIP}.sha256"
+        # Ensure standalone .sha256 exists for primary & incremental zips
+        if [[ "${f}" == "${PRIMARY_ZIP}" || "${f}" == "${INCREMENTAL_ZIP}" ]]; then
+            local zip_sha_file="${f}.sha256"
             printf "%s  %s\n" "${sha}" "${f}" > "${zip_sha_file}"
             UPLOAD_FILES+=("${zip_sha_file}")
         fi
@@ -371,28 +491,19 @@ resolve_release_info() {
             RELEASE_TAG="v2.9-$(date +%Y%m%d)"
         fi
 
-        local effective_suffix="${TAG_SUFFIX}"
-        if [[ -z "${effective_suffix}" && "${DETECTED_FS}" == "erofs" ]]; then
-            effective_suffix="erofs"
+        if [[ -n "${TAG_SUFFIX}" ]]; then
+            RELEASE_TAG="${RELEASE_TAG}-${TAG_SUFFIX}"
         fi
-        if [[ -n "${effective_suffix}" ]]; then
-            RELEASE_TAG="${RELEASE_TAG}-${effective_suffix}"
-        fi
-    fi
-
-    local fs_badge=""
-    if [[ "${DETECTED_FS}" == "erofs" ]]; then
-        fs_badge=" [EROFS]"
     fi
 
     if [[ -n "${CUSTOM_TITLE}" ]]; then
         RELEASE_TITLE="${CUSTOM_TITLE}"
     elif [[ "${ROM_FLAVOR}" == "AxionOS" ]]; then
-        RELEASE_TITLE="AxionOS ${ROM_VERSION:-2.9} (NOESIS)${fs_badge} – UNOFFICIAL for Cubot P50 (marlon)"
+        RELEASE_TITLE="AxionOS ${ROM_VERSION:-2.9} (NOESIS) – UNOFFICIAL for Cubot P50 (marlon)"
     elif [[ "${ROM_FLAVOR}" == "LineageOS" ]]; then
-        RELEASE_TITLE="LineageOS ${ROM_VERSION:-23.2}${fs_badge} – UNOFFICIAL for Cubot P50 (marlon)"
+        RELEASE_TITLE="LineageOS ${ROM_VERSION:-23.2} – UNOFFICIAL for Cubot P50 (marlon)"
     else
-        RELEASE_TITLE="Custom ROM Build${fs_badge} for Cubot P50 (marlon) - ${RELEASE_TAG}"
+        RELEASE_TITLE="Custom ROM Build for Cubot P50 (marlon) - ${RELEASE_TAG}"
     fi
 
     log "Target Repository: ${TARGET_REPO}"
@@ -400,6 +511,7 @@ resolve_release_info() {
     log "Release Tag:       ${RELEASE_TAG}"
     log "Release Title:     ${RELEASE_TITLE}"
     log "Pre-release:       ${IS_PRERELEASE}"
+    [[ -n "${TARGET_FILES_ZIP}" ]] && log "Target-Files ZIP:  ${TARGET_FILES_ZIP}"
 }
 
 # Generate rich markdown release notes
@@ -467,10 +579,9 @@ EOF
     if [[ "${DETECTED_FS}" == "erofs" ]]; then
         cat <<'EOF' >> "${NOTES_TMP}"
 
-- **EROFS Dynamic Partitions (`test/erofs`):**
-  - Switched read-only dynamic super partitions (`system`, `vendor`, `product`) from `ext4` to **EROFS** (`lz4hc,9`, `BOARD_EROFS_PCLUSTER_SIZE := 262144`) to reduce uncompressed super-partition image footprints.
-  - Retained secondary `ext4` fallback entries in `fstab.mt6765` and `fstab.mt6762`.
-  - Uses kernel `4.19.325` supported EROFS features (`sb_csum`, `mtime`, `0padding`, `compr_cfgs`, `big_pcluster`) — `LZMA`, `CHUNKED_FILE`, `ZTAILPACKING`, and `FRAGMENTS` are omitted to match kernel `4.19` `EROFS_ALL_FEATURE_INCOMPAT`.
+- **EROFS Dynamic Partitions (Default):**
+  - Read-only dynamic super partitions (`system`, `vendor`, `product`) use **EROFS** (`lz4hc,9`, `BOARD_EROFS_PCLUSTER_SIZE := 262144`) with secondary `ext4` fallback entries in `fstab.mt6765` and `fstab.mt6762`.
+  - Uses kernel `4.19.325` supported EROFS features (`sb_csum`, `mtime`, `0padding`, `compr_cfgs`, `big_pcluster`).
 EOF
     fi
 
@@ -509,11 +620,25 @@ fastboot reboot recovery
 #### Recovery (ADB Sideload)
 1. In recovery, select **Factory Reset** -> **Format data / factory reset**.
 2. Select **Apply update** -> **Apply from ADB**.
-3. Sideload the ROM zip:
+3. Sideload the full ROM zip:
 \`\`\`bash
 adb sideload ${PRIMARY_ZIP:-"rom.zip"}
 \`\`\`
 4. Reboot system.
+EOF
+
+    if [[ -n "${INCREMENTAL_ZIP}" ]]; then
+        cat <<EOF >> "${NOTES_TMP}"
+
+#### Incremental OTA Update (Existing Matching Baseline Only)
+\`\`\`bash
+adb sideload ${INCREMENTAL_ZIP}
+\`\`\`
+*(Or select **Local update** in Settings -> System -> Updater. Only applies cleanly on top of the exact matching prior baseline build without \`/system\`, \`/vendor\`, or \`/product\` modifications.)*
+EOF
+    fi
+
+    cat <<EOF >> "${NOTES_TMP}"
 
 ---
 
@@ -603,6 +728,177 @@ publish_release() {
     log "=================================================="
 }
 
+# Upload target-files baseline to SourceForge FRS via rsync if configured
+upload_baseline_sourceforge() {
+    [[ -n "${SF_DEST}" ]] || return 0
+    if [[ -z "${TARGET_FILES_ZIP}" || ! -f "${TARGET_FILES_ZIP}" ]]; then
+        warn "--sf-dest specified, but no target-files zip was found; skipping SourceForge upload."
+        return 0
+    fi
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log "[DRY-RUN] Would rsync ${TARGET_FILES_ZIP} (+ .sha256) to SourceForge: ${SF_DEST}/"
+        return 0
+    fi
+
+    command -v rsync >/dev/null 2>&1 || die "'rsync' is required for --sf-dest SourceForge upload."
+    log "Uploading target-files baseline to SourceForge (${SF_DEST})..."
+    rsync -avP --partial "${TARGET_FILES_ZIP}" "${TARGET_FILES_ZIP}.sha256" "${SF_DEST}/"
+}
+
+# Generate and optionally commit/push Axion Updater JSON
+write_ota_json() {
+    [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]] || return 0
+
+    local json_out="${OTA_JSON_OUT:-${PRODUCT_DIR}/marlon.json}"
+    local parts_joined=""
+    if [[ ${#SPLIT_PARTS[@]} -gt 0 ]]; then
+        parts_joined="$(printf '%s\n' "${SPLIT_PARTS[@]}")"
+    fi
+
+    local resolved_tf_url="${BASELINE_URL}"
+    if [[ -z "${resolved_tf_url}" && -n "${BASELINE_BASE_URL}" && -n "${TARGET_FILES_ZIP}" ]]; then
+        local tf_name
+        tf_name="$(basename "${TARGET_FILES_ZIP}")"
+        if [[ "${BASELINE_BASE_URL}" == *"sourceforge.net"* ]]; then
+            resolved_tf_url="${BASELINE_BASE_URL%/}/${tf_name}/download"
+        else
+            resolved_tf_url="${BASELINE_BASE_URL%/}/${tf_name}"
+        fi
+    fi
+
+    local json_payload
+    json_payload="$(python3 - \
+        "${PRODUCT_DIR}" "${PRIMARY_ZIP}" "${TARGET_REPO}" "${RELEASE_TAG}" \
+        "${ROM_VERSION:-2.9}" "${ROM_TYPE_TAG:-UNOFFICIAL}" \
+        "${INCREMENTAL_ZIP}" "${TARGET_FILES_ZIP}" "${resolved_tf_url}" "${parts_joined}" <<'PY'
+import hashlib, json, pathlib, re, sys, time
+
+(
+    product_dir, primary_zip, repo, tag,
+    version, romtype, incr_zip, tf_zip, tf_url, parts_raw
+) = sys.argv[1:]
+
+pdir = pathlib.Path(product_dir)
+primary_path = pdir / primary_zip
+
+def md5_file(p: pathlib.Path) -> str:
+    h = hashlib.md5()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def sha256_file(p: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+build_utc = None
+for prop_path in [pdir / "system/build.prop", pdir / "obj/PACKAGING/target_files_intermediates/lineage_marlon-target_files/SYSTEM/build.prop"]:
+    if prop_path.is_file():
+        for line in prop_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("ro.build.date.utc="):
+                build_utc = int(line.split("=", 1)[1].strip())
+                break
+    if build_utc is not None:
+        break
+if build_utc is None:
+    build_utc = int(time.time())
+
+base_url = f"https://github.com/{repo}/releases/download/{tag}"
+entry = {
+    "datetime": build_utc,
+    "filename": primary_zip,
+    "id": md5_file(primary_path),
+    "romtype": romtype,
+    "size": primary_path.stat().st_size,
+    "url": f"{base_url}/{primary_zip}",
+    "version": version,
+}
+
+if incr_zip and (pdir / incr_zip).is_file():
+    ipath = pdir / incr_zip
+    m = re.search(r"-(\d{8})-to-(\d{8})-INCREMENTAL-", incr_zip)
+    entry["incremental"] = {
+        "base_date": m.group(1) if m else "",
+        "target_date": m.group(2) if m else "",
+        "filename": incr_zip,
+        "id": md5_file(ipath),
+        "size": ipath.stat().st_size,
+        "sha256": sha256_file(ipath),
+        "url": f"{base_url}/{incr_zip}",
+    }
+
+if tf_zip and pathlib.Path(tf_zip).is_file():
+    tf_path = pathlib.Path(tf_zip)
+    sha_sidecar = pathlib.Path(str(tf_path) + ".sha256")
+    tf_sha = ""
+    if sha_sidecar.is_file():
+        tf_sha = sha_sidecar.read_text(encoding="utf-8").strip().split()[0]
+    else:
+        tf_sha = sha256_file(tf_path)
+
+    tf_meta = {
+        "filename": tf_path.name,
+        "size": tf_path.stat().st_size,
+        "sha256": tf_sha,
+        "url": tf_url or "",
+    }
+    part_names = [line.strip() for line in parts_raw.splitlines() if line.strip()]
+    if part_names:
+        tf_meta["parts"] = [
+            {
+                "filename": pname,
+                "size": (pdir / pname).stat().st_size,
+                "sha256": sha256_file(pdir / pname),
+                "url": f"{base_url}/{pname}",
+            }
+            for pname in part_names
+            if (pdir / pname).is_file()
+        ]
+    elif not tf_url and tf_path.name in [x.name for x in pdir.iterdir()]:
+        tf_meta["url"] = f"{base_url}/{tf_path.name}"
+
+    entry["target_files"] = tf_meta
+
+print(json.dumps({"response": [entry]}, indent=2))
+PY
+)"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log "[DRY-RUN] Would write Axion OTA JSON (${json_out}):"
+        printf '%s\n' "${json_payload}"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${json_out}")"
+    printf '%s\n' "${json_payload}" > "${json_out}"
+    log "[+] Wrote Axion OTA JSON: ${json_out}"
+
+    if [[ -d "${HOME}/ota-baselines" && "$(cd "$(dirname "${json_out}")" && pwd)/$(basename "${json_out}")" != "${HOME}/ota-baselines/marlon.json" ]]; then
+        printf '%s\n' "${json_payload}" > "${HOME}/ota-baselines/marlon.json"
+        log "[+] Mirrored OTA JSON: ${HOME}/ota-baselines/marlon.json"
+    fi
+
+    if [[ -n "${OTA_JSON_PUSH_DIR}" ]]; then
+        [[ -d "${OTA_JSON_PUSH_DIR}/.git" ]] || die "--ota-json-push directory is not a git repo: ${OTA_JSON_PUSH_DIR}"
+        local rel_json
+        rel_json="$(realpath --relative-to="${OTA_JSON_PUSH_DIR}" "${json_out}" 2>/dev/null || true)"
+        [[ -n "${rel_json}" && "${rel_json}" != ../* ]] || die "--ota-json-out (${json_out}) must be inside --ota-json-push (${OTA_JSON_PUSH_DIR})."
+        if ! git -C "${OTA_JSON_PUSH_DIR}" diff --quiet -- "${rel_json}" || [[ -n "$(git -C "${OTA_JSON_PUSH_DIR}" status --porcelain -- "${rel_json}")" ]]; then
+            git -C "${OTA_JSON_PUSH_DIR}" add "${rel_json}"
+            git -C "${OTA_JSON_PUSH_DIR}" commit -s -m "ota(marlon): update ${RELEASE_TAG} release JSON"
+            git -C "${OTA_JSON_PUSH_DIR}" push
+            log "[+] Committed and pushed updated OTA JSON in ${OTA_JSON_PUSH_DIR}"
+        else
+            log "OTA JSON unchanged in ${OTA_JSON_PUSH_DIR}; skipping git commit."
+        fi
+    fi
+}
+
 main() {
     parse_args "$@"
     verify_environment
@@ -611,6 +907,8 @@ main() {
     resolve_release_info
     generate_release_notes
     publish_release
+    upload_baseline_sourceforge
+    write_ota_json
 }
 
 main "$@"

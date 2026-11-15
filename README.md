@@ -104,20 +104,27 @@ An automated, idempotent GitHub release script is included to publish ROM builds
 ```
 
 - **Idempotent:** Re-running against an existing tag updates release notes and clobbers/updates assets without duplicating or failing.
-- **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
+- **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), optional incremental OTA zip (`*-INCREMENTAL-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), target-files baseline (`~/ota-baselines/marlon-target_files-<DATE>.zip`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
 - **Options:**
   - `-d, --dir <path>`: Target product directory.
   - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/android_device_cubot_marlon`).
   - `-t, --tag <tag>`: Custom tag name (auto-detected if omitted).
-  - `-s, --tag-suffix <suffix>`: Append tag suffix (defaults to `erofs` automatically when EROFS images are detected).
+  - `-s, --tag-suffix <suffix>`: Optional suffix appended to auto-generated tags (e.g. `r2`).
   - `-m, --title <title>`: Custom release title.
   - `-n, --notes <file>`: Custom markdown file replacing the release body.
   - `-a, --append-notes <file>`: Append custom notes while keeping highlights and SHA-256 checksums.
-  - `--fs <auto|erofs|ext4>`: Override super partition filesystem auto-detection.
+  - `--fs <auto|erofs|ext4>`: Override super partition filesystem auto-detection (EROFS is default).
+  - `-i, --incremental <file>`: Incremental OTA zip to attach alongside the full ROM zip.
+  - `-b, --target-files <file>`: Target-files baseline zip to track in generated `marlon.json`.
+  - `--baseline-url <url>` / `--baseline-base-url <url>`: Target-files download URL (supports SourceForge `/download` URLs) written to `marlon.json`.
+  - `--sf-dest <rsync-dest>`: Optional SourceForge FRS rsync upload target for `target-files.zip`.
+  - `--split-baseline`: Split `>1900 MiB` `target-files.zip` into `<=1800 MiB` GitHub Release parts.
+  - `--ota-json-out <file>` / `--ota-json-push <git-dir>`: Generate and optionally commit/push Axion Updater `marlon.json`.
   - `--prerelease` / `--draft`: Mark the release as pre-release or draft.
-  - `--dry-run`: Preview assets and release notes without uploading.
+  - `--dry-run`: Preview assets, release notes, and generated OTA JSON without uploading.
 
-Alternatively, pass `--release` directly to `./build-axion.sh` to upload automatically upon a successful build.
+### Incremental OTA & Baseline Workflow (`build-axion.sh`)
+Pass `--incremental` (with `--ota-json <url|file>`, `--baseline-base-url`, `--sf-dest`, and `--release`) to `./build.sh` so a build automatically archives its `target-files.zip`, fetches and SHA-256-verifies the prior baseline from the OTA JSON URL on a fresh server, signs an incremental OTA via `ota_from_target_files -i`, and publishes everything together.
 
 ## Contributing
 - Follow Conventional Commits: `<type>(<scope>): <summary>`

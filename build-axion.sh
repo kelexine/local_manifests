@@ -33,6 +33,21 @@ CLEAR_RBE=false
 SKIP_GLOBS=false
 KERNEL_ONLY=false
 AUTO_RELEASE=false
+ARCHIVE_BASELINE=true
+BUILD_INCREMENTAL=false
+INCREMENTAL_FROM=""
+OTA_JSON_SOURCE="${OTA_JSON_URL:-}"
+BASELINE_DIR="${HOME}/ota-baselines"
+OTA_JSON_OUT=""
+BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-}"
+BASELINE_URL="${OTA_BASELINE_URL:-}"
+SF_DEST="${OTA_SF_DEST:-}"
+SPLIT_BASELINE=false
+RELEASE_TAG_OVERRIDE=""
+RELEASE_PRERELEASE=false
+CURRENT_TARGET_FILES_ZIP=""
+PREV_TARGET_FILES_ZIP=""
+INCREMENTAL_ZIP_PATH=""
 
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
 
@@ -76,11 +91,24 @@ Optimizations & Options:
   --clear-rbe                     Discard local RBE action cache via clearRBECache
   --skip-globs                    Skip ninja globs via skipGlobs 1
   --kernel-only, bKernel, -k      Build only inline kernel, dtbs, and in-tree modules
-  --release, -r                   Push completed build artifacts to GitHub Release via push-release.sh
+  --no-baseline                   Skip packaging target-files baseline zip after bacon build
+  --incremental                   Generate incremental OTA zip from previous baseline (via --ota-json or cache)
+  --incremental-from <zip|url>    Explicit previous target-files zip path or URL for incremental OTA
+  --ota-json <url|file>           OTA JSON URL/path to resolve previous target-files baseline (env: OTA_JSON_URL)
+  --baseline-dir <dir>            Directory to cache/archive target-files zips (default: ~/ota-baselines)
+  --baseline-url <url>            Explicit target-files download URL passed to push-release.sh (env: OTA_BASELINE_URL)
+  --baseline-base-url <url>       Base URL for uploaded target-files baseline (env: OTA_BASELINE_BASE_URL)
+  --sf-dest <rsync-dest>          SourceForge FRS rsync target for baseline upload (env: OTA_SF_DEST)
+  --split-baseline                Split target-files zip into <=1.8GiB GitHub Release parts if not using external host
+  --ota-json-out <file>           Output path for updated marlon.json passed to push-release.sh
+  --tag <tag>                     Explicit GitHub release tag passed to push-release.sh
+  --prerelease                    Mark GitHub release as pre-release
+  --release, -r                   Push completed build artifacts (full + incremental) via push-release.sh
 
 Examples:
   ./build.sh userdebug
   ./build.sh user core -b -j192
+  ./build.sh userdebug core -b --incremental --ota-json https://raw.githubusercontent.com/.../marlon.json --release
   ./build.sh userdebug vanilla --skip-globs
   ./build.sh --kernel-only
 EOF
@@ -126,6 +154,59 @@ parse_arguments() {
                 ;;
             --kernel-only|bKernel|-k)
                 KERNEL_ONLY=true
+                ;;
+            --no-baseline)
+                ARCHIVE_BASELINE=false
+                ;;
+            --incremental)
+                BUILD_INCREMENTAL=true
+                ;;
+            --incremental-from)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a path or URL."
+                BUILD_INCREMENTAL=true
+                INCREMENTAL_FROM="$2"
+                shift
+                ;;
+            --ota-json)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a URL or file path."
+                OTA_JSON_SOURCE="$2"
+                shift
+                ;;
+            --baseline-dir)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a directory path."
+                BASELINE_DIR="$2"
+                shift
+                ;;
+            --baseline-url)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a URL."
+                BASELINE_URL="$2"
+                shift
+                ;;
+            --baseline-base-url)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a base URL."
+                BASELINE_BASE_URL="$2"
+                shift
+                ;;
+            --sf-dest)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an rsync destination."
+                SF_DEST="$2"
+                shift
+                ;;
+            --split-baseline)
+                SPLIT_BASELINE=true
+                ;;
+            --ota-json-out)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a file path."
+                OTA_JSON_OUT="$2"
+                shift
+                ;;
+            --tag)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a release tag."
+                RELEASE_TAG_OVERRIDE="$2"
+                shift
+                ;;
+            --prerelease)
+                RELEASE_PRERELEASE=true
                 ;;
             --release|-r)
                 AUTO_RELEASE=true
@@ -265,6 +346,258 @@ build_inline_kernel() {
     mka kernel dtboimage || die "Kernel compilation failed."
 }
 
+read_zip_prop() {
+    local zip_path="$1"
+    local key="$2"
+    python3 - "$zip_path" "$key" <<'PY'
+import sys, zipfile
+zip_path, key = sys.argv[1], sys.argv[2]
+prefix = key + "="
+with zipfile.ZipFile(zip_path) as zf:
+    for candidate in ("SYSTEM/build.prop", "PRODUCT/etc/build.prop"):
+        if candidate in zf.namelist():
+            for line in zf.read(candidate).decode("utf-8", "replace").splitlines():
+                if line.startswith(prefix):
+                    print(line[len(prefix):].strip())
+                    sys.exit(0)
+PY
+}
+
+package_and_archive_baseline() {
+    local out_target="$1"
+    [[ "${BUILD_TYPE}" == "-b" ]] || return 0
+    if [[ "${ARCHIVE_BASELINE}" != "true" && "${BUILD_INCREMENTAL}" != "true" ]]; then
+        return 0
+    fi
+
+    local primary_zip
+    primary_zip="$(find "${out_target}" -maxdepth 1 -type f -name 'axion-*.zip' ! -name '*-ota.zip' ! -name '*-INCREMENTAL-*.zip' -printf '%f\n' | sort -r | head -n 1 || true)"
+    local build_date=""
+    if [[ "${primary_zip}" =~ -([0-9]{8})- ]]; then
+        build_date="${BASH_REMATCH[1]}"
+    else
+        build_date="$(date +%Y%m%d)"
+    fi
+
+    local tf_interm="${out_target}/obj/PACKAGING/target_files_intermediates/lineage_${DEVICE}-target_files"
+    local soong_zip="${WORKSPACE_ROOT}/out/host/linux-x86/bin/soong_zip"
+    mkdir -p "${BASELINE_DIR}"
+
+    local curr_utc=""
+    if [[ -f "${tf_interm}/SYSTEM/build.prop" ]]; then
+        curr_utc="$(grep -m1 '^ro\.build\.date\.utc=' "${tf_interm}/SYSTEM/build.prop" | cut -d'=' -f2 | tr -d '\r\n' || true)"
+    fi
+
+    local archive_zip="${BASELINE_DIR}/${DEVICE}-target_files-${build_date}.zip"
+    if [[ -f "${archive_zip}" && -n "${curr_utc}" ]]; then
+        local existing_utc
+        existing_utc="$(read_zip_prop "${archive_zip}" "ro.build.date.utc" || true)"
+        if [[ -n "${existing_utc}" && "${existing_utc}" != "${curr_utc}" ]]; then
+            archive_zip="${BASELINE_DIR}/${DEVICE}-target_files-${build_date}-${curr_utc}.zip"
+        fi
+    fi
+
+    if [[ -x "${soong_zip}" && -d "${tf_interm}" && -f "${tf_interm}.zip.list" ]]; then
+        log "Packaging target-files baseline via soong_zip -> ${archive_zip}"
+        "${soong_zip}" -d -o "${archive_zip}" -C "${tf_interm}" -r "${tf_interm}.zip.list" -sha256 || die "soong_zip target-files packaging failed."
+    else
+        log "Building target-files-package via mka..."
+        mka target-files-package || die "target-files-package build failed."
+        cp -f "${tf_interm}.zip" "${archive_zip}"
+    fi
+
+    sha256sum "${archive_zip}" > "${archive_zip}.sha256"
+    CURRENT_TARGET_FILES_ZIP="${archive_zip}"
+    log "[+] Archived target-files baseline: ${CURRENT_TARGET_FILES_ZIP}"
+}
+
+resolve_previous_baseline() {
+    PREV_TARGET_FILES_ZIP=""
+
+    if [[ -n "${INCREMENTAL_FROM}" ]]; then
+        if [[ -f "${INCREMENTAL_FROM}" ]]; then
+            PREV_TARGET_FILES_ZIP="$(cd "$(dirname "${INCREMENTAL_FROM}")" && pwd)/$(basename "${INCREMENTAL_FROM}")"
+            return 0
+        elif [[ "${INCREMENTAL_FROM}" =~ ^https?:// ]]; then
+            mkdir -p "${BASELINE_DIR}"
+            local dl_name
+            dl_name="$(basename "${INCREMENTAL_FROM%%\?*}")"
+            [[ "${dl_name}" == "download" || -z "${dl_name}" ]] && dl_name="${DEVICE}-prev-target_files.zip"
+            local dl_path="${BASELINE_DIR}/${dl_name}"
+            log "Downloading explicit baseline from ${INCREMENTAL_FROM}..."
+            curl -fL --retry 3 -o "${dl_path}" "${INCREMENTAL_FROM}" || die "Failed to download baseline: ${INCREMENTAL_FROM}"
+            PREV_TARGET_FILES_ZIP="${dl_path}"
+            return 0
+        else
+            die "Explicit --incremental-from target not found: ${INCREMENTAL_FROM}"
+        fi
+    fi
+
+    local json_src="${OTA_JSON_SOURCE}"
+    if [[ -z "${json_src}" && -f "${BASELINE_DIR}/${DEVICE}.json" ]]; then
+        json_src="${BASELINE_DIR}/${DEVICE}.json"
+    fi
+
+    local curr_utc=""
+    curr_utc="$(read_zip_prop "${CURRENT_TARGET_FILES_ZIP}" "ro.build.date.utc" || true)"
+
+    if [[ -n "${json_src}" ]]; then
+        log "Resolving previous baseline via OTA JSON: ${json_src}"
+        PREV_TARGET_FILES_ZIP="$(python3 - "${json_src}" "${BASELINE_DIR}" "${curr_utc}" <<'PY'
+import hashlib, json, pathlib, subprocess, sys, urllib.request
+
+json_src, baseline_dir_str, curr_utc = sys.argv[1], sys.argv[2], sys.argv[3]
+baseline_dir = pathlib.Path(baseline_dir_str)
+baseline_dir.mkdir(parents=True, exist_ok=True)
+
+def sha256_file(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def download_file(url: str, dst: pathlib.Path) -> None:
+    subprocess.run(["curl", "-fL", "--retry", "3", "-o", str(dst), url], check=True)
+
+if json_src.startswith(("http://", "https://")):
+    req = urllib.request.Request(json_src, headers={"User-Agent": "axion-build-ota/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+else:
+    data = json.loads(pathlib.Path(json_src).read_text(encoding="utf-8"))
+
+entries = data.get("response") or []
+if not entries:
+    sys.exit(0)
+latest = entries[0]
+if curr_utc and str(latest.get("datetime", "")) == curr_utc:
+    print("SAME_BUILD")
+    sys.exit(0)
+
+tf = latest.get("target_files") or {}
+filename = tf.get("filename") or ""
+expected_sha = (tf.get("sha256") or "").lower()
+single_url = tf.get("url") or ""
+parts = tf.get("parts") or []
+if not filename:
+    sys.exit(0)
+
+dst = baseline_dir / filename
+if dst.is_file():
+    if not expected_sha or sha256_file(dst) == expected_sha:
+        print(str(dst))
+        sys.exit(0)
+    dst.unlink()
+
+if single_url:
+    download_file(single_url, dst)
+elif parts:
+    part_paths = []
+    for idx, part in enumerate(parts):
+        purl = part.get("url") or ""
+        if not purl:
+            sys.exit(2)
+        pname = part.get("filename") or f"{filename}.part-{idx:02d}"
+        ppath = baseline_dir / pname
+        psha = (part.get("sha256") or "").lower()
+        if not ppath.is_file() or (psha and sha256_file(ppath) != psha):
+            download_file(purl, ppath)
+            if psha and sha256_file(ppath) != psha:
+                raise RuntimeError(f"Checksum mismatch on part {pname}")
+        part_paths.append(ppath)
+    with dst.open("wb") as out_f:
+        for ppath in part_paths:
+            with ppath.open("rb") as in_f:
+                while buf := in_f.read(4 * 1024 * 1024):
+                    out_f.write(buf)
+else:
+    sys.exit(0)
+
+if expected_sha and sha256_file(dst) != expected_sha:
+    dst.unlink(missing_ok=True)
+    raise RuntimeError(f"Checksum mismatch on {filename}")
+
+print(str(dst))
+PY
+)" || die "Failed resolving baseline from OTA JSON (${json_src})."
+
+        if [[ "${PREV_TARGET_FILES_ZIP}" == "SAME_BUILD" ]]; then
+            warn "OTA JSON points to the exact same build timestamp (${curr_utc}); skipping incremental OTA."
+            PREV_TARGET_FILES_ZIP=""
+            return 0
+        fi
+        [[ -n "${PREV_TARGET_FILES_ZIP}" ]] && return 0
+    fi
+
+    # Offline cache fallback: pick newest other target-files zip in BASELINE_DIR
+    local candidate
+    while IFS= read -r candidate; do
+        [[ -z "${candidate}" ]] && continue
+        if [[ "${candidate}" != "${CURRENT_TARGET_FILES_ZIP}" ]]; then
+            PREV_TARGET_FILES_ZIP="${candidate}"
+            return 0
+        fi
+    done < <(ls -t "${BASELINE_DIR}/${DEVICE}-target_files-"*.zip 2>/dev/null || true)
+}
+
+generate_incremental_ota() {
+    local out_target="$1"
+    [[ "${BUILD_INCREMENTAL}" == "true" ]] || return 0
+    [[ -n "${CURRENT_TARGET_FILES_ZIP}" && -f "${CURRENT_TARGET_FILES_ZIP}" ]] || {
+        warn "Current target-files zip missing; skipping incremental OTA generation."
+        return 0
+    }
+
+    resolve_previous_baseline
+    if [[ -z "${PREV_TARGET_FILES_ZIP}" || ! -f "${PREV_TARGET_FILES_ZIP}" ]]; then
+        warn "No previous target-files baseline found; skipping incremental OTA (this build is still archived as next baseline)."
+        return 0
+    fi
+
+    local prev_utc curr_utc
+    prev_utc="$(read_zip_prop "${PREV_TARGET_FILES_ZIP}" "ro.build.date.utc" || true)"
+    curr_utc="$(read_zip_prop "${CURRENT_TARGET_FILES_ZIP}" "ro.build.date.utc" || true)"
+    if [[ -n "${prev_utc}" && -n "${curr_utc}" && "${prev_utc}" -ge "${curr_utc}" ]]; then
+        warn "Source baseline UTC (${prev_utc}) >= target UTC (${curr_utc}); skipping incremental OTA."
+        return 0
+    fi
+
+    local prev_date curr_date
+    prev_date="$(date -u -d "@${prev_utc:-0}" +%Y%m%d 2>/dev/null || basename "${PREV_TARGET_FILES_ZIP}" | grep -oE '[0-9]{8}' | head -n1 || echo "prev")"
+    curr_date="$(date -u -d "@${curr_utc:-0}" +%Y%m%d 2>/dev/null || date +%Y%m%d)"
+
+    local primary_zip
+    primary_zip="$(find "${out_target}" -maxdepth 1 -type f -name 'axion-*.zip' ! -name '*-ota.zip' ! -name '*-INCREMENTAL-*.zip' -printf '%f\n' | sort -r | head -n 1 || true)"
+    local incr_name
+    if [[ "${primary_zip}" =~ ^(axion-[0-9.]+-[A-Za-z0-9_]+)-[0-9]{8}-(.*)\.zip$ ]]; then
+        incr_name="${BASH_REMATCH[1]}-${prev_date}-to-${curr_date}-INCREMENTAL-${BASH_REMATCH[2]}.zip"
+    else
+        incr_name="axion-${DEVICE}-${prev_date}-to-${curr_date}-INCREMENTAL.zip"
+    fi
+
+    local incr_path="${out_target}/${incr_name}"
+    local ota_tool="${WORKSPACE_ROOT}/out/host/linux-x86/bin/ota_from_target_files"
+    local key_pair="${WORKSPACE_ROOT}/vendor/lineage-priv/keys/releasekey"
+    [[ -x "${ota_tool}" ]] || die "ota_from_target_files not found at ${ota_tool}"
+    [[ -f "${key_pair}.pk8" ]] || die "Release signing key not found at ${key_pair}.pk8"
+
+    log "Generating incremental OTA (${prev_date} -> ${curr_date})..."
+    log "  Source baseline: ${PREV_TARGET_FILES_ZIP}"
+    log "  Target baseline: ${CURRENT_TARGET_FILES_ZIP}"
+    "${ota_tool}" \
+        --verbose \
+        --path "${WORKSPACE_ROOT}/out/host/linux-x86" \
+        -k "${key_pair}" \
+        -i "${PREV_TARGET_FILES_ZIP}" \
+        "${CURRENT_TARGET_FILES_ZIP}" \
+        "${incr_path}" || die "ota_from_target_files incremental build failed."
+
+    sha256sum "${incr_path}" > "${incr_path}.sha256"
+    INCREMENTAL_ZIP_PATH="${incr_path}"
+    log "[+] Incremental OTA built: ${INCREMENTAL_ZIP_PATH} ($(du -h "${incr_path}" | awk '{print $1}'))"
+}
+
 build_rom_package() {
     log "Starting AxionOS ROM packaging (${BUILD_TYPE})..."
     local -a job_args=()
@@ -280,16 +613,20 @@ build_rom_package() {
         mka bacon "${job_args[@]}" || die "AxionOS packaging failed."
     fi
 
+    local out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
     log "[+] Build completed successfully!"
-    log "[+] Output images located at: ${OUT}"
+    log "[+] Output images located at: ${out_target}"
+
+    package_and_archive_baseline "${out_target}"
+    generate_incremental_ota "${out_target}"
 
     local pub_dir="/var/www/html/kelexine"
     if [[ -d "/var/www/html" && -w "/var/www/html" ]] || [[ -w "${pub_dir}" ]]; then
         mkdir -p "${pub_dir}" 2>/dev/null || true
-        if compgen -G "${OUT}/axion*.zip" > /dev/null; then
-            cp -v "${OUT}"/axion*.zip "${pub_dir}/" 2>/dev/null || true
+        if compgen -G "${out_target}/axion*.zip" > /dev/null; then
+            cp -v "${out_target}"/axion*.zip "${pub_dir}/" 2>/dev/null || true
             local latest_zip
-            latest_zip="$(find "${OUT}" -maxdepth 1 -name 'axion*.zip' | head -n 1)"
+            latest_zip="$(find "${out_target}" -maxdepth 1 -name 'axion*.zip' ! -name '*-INCREMENTAL-*.zip' | head -n 1 || true)"
             [[ -n "${latest_zip}" ]] && ln -sfn "$(basename "${latest_zip}")" "${pub_dir}/axion-marlon-latest.zip" 2>/dev/null || true
             log "[+] Published ROM zip: https://ferrari.serverhive.in/kelexine/"
         fi
@@ -307,16 +644,26 @@ build_rom_package() {
             push_script="$(command -v push-release.sh)"
         fi
 
-        local out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
         if [[ -n "${push_script}" ]]; then
+            local -a release_args=()
+            [[ -n "${INCREMENTAL_ZIP_PATH}" ]] && release_args+=("--incremental" "${INCREMENTAL_ZIP_PATH}")
+            [[ -n "${CURRENT_TARGET_FILES_ZIP}" ]] && release_args+=("--target-files" "${CURRENT_TARGET_FILES_ZIP}")
+            [[ -n "${BASELINE_URL}" ]] && release_args+=("--baseline-url" "${BASELINE_URL}")
+            [[ -n "${BASELINE_BASE_URL}" ]] && release_args+=("--baseline-base-url" "${BASELINE_BASE_URL}")
+            [[ -n "${SF_DEST}" ]] && release_args+=("--sf-dest" "${SF_DEST}")
+            [[ "${SPLIT_BASELINE}" == "true" ]] && release_args+=("--split-baseline")
+            [[ -n "${OTA_JSON_OUT}" ]] && release_args+=("--ota-json-out" "${OTA_JSON_OUT}")
+            [[ -n "${RELEASE_TAG_OVERRIDE}" ]] && release_args+=("--tag" "${RELEASE_TAG_OVERRIDE}")
+            [[ "${RELEASE_PRERELEASE}" == "true" ]] && release_args+=("--prerelease")
+
             log "Triggering automatic GitHub release push via ${push_script}..."
-            "${push_script}" "${out_target}" || warn "Release upload failed or was skipped."
+            "${push_script}" "${release_args[@]}" "${out_target}" || warn "Release upload failed or was skipped."
         else
             warn "Automatic release requested (-r/--release), but push-release.sh was not found or is not executable!"
         fi
     else
         log "[*] To publish this build to GitHub Releases, run:"
-        log "    ./push-release.sh ${OUT:-out/target/product/${DEVICE}}"
+        log "    ./push-release.sh ${out_target}"
     fi
 }
 
