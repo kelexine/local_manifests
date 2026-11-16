@@ -528,14 +528,41 @@ resolve_release_info() {
     if [[ -n "${CUSTOM_TAG}" ]]; then
         RELEASE_TAG="${CUSTOM_TAG}"
     else
+        local base_tag=""
         if [[ -n "${BUILD_TAG_SUGGESTION}" ]]; then
-            RELEASE_TAG="${BUILD_TAG_SUGGESTION}"
+            base_tag="${BUILD_TAG_SUGGESTION}"
         else
-            RELEASE_TAG="v2.9-$(date +%Y%m%d)"
+            base_tag="v2.9-$(date +%Y%m%d)"
         fi
 
         if [[ -n "${TAG_SUFFIX}" ]]; then
-            RELEASE_TAG="${RELEASE_TAG}-${TAG_SUFFIX}"
+            RELEASE_TAG="${base_tag}-${TAG_SUFFIX}"
+        else
+            RELEASE_TAG="${base_tag}"
+            local curr_primary_sha=""
+            if [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]]; then
+                curr_primary_sha="$(awk -v f="${PRIMARY_ZIP}" '$2 == f {print $1; exit}' "${PRODUCT_DIR}/SHA256SUMS.txt" 2>/dev/null || true)"
+                [[ -n "${curr_primary_sha}" ]] || curr_primary_sha="$(sha256sum "${PRODUCT_DIR}/${PRIMARY_ZIP}" | awk '{print $1}')"
+            fi
+
+            if command -v gh >/dev/null 2>&1; then
+                local rev_idx=1
+                local cand_tag="${base_tag}"
+                local existing_body=""
+                while existing_body="$(gh release view "${cand_tag}" -R "${TARGET_REPO}" --json body -q .body 2>/dev/null)"; do
+                    if [[ -n "${curr_primary_sha}" && "${existing_body}" == *"${curr_primary_sha}"* ]]; then
+                        log "Existing release '${cand_tag}' matches current build SHA-256 (${curr_primary_sha:0:12}...) — reusing tag."
+                        RELEASE_TAG="${cand_tag}"
+                        break
+                    fi
+                    rev_idx=$((rev_idx + 1))
+                    cand_tag="${base_tag}-r${rev_idx}"
+                    RELEASE_TAG="${cand_tag}"
+                done
+                if [[ "${RELEASE_TAG}" != "${base_tag}" ]]; then
+                    log "Release '${base_tag}' belongs to an earlier build today; auto-selected tag '${RELEASE_TAG}'."
+                fi
+            fi
         fi
     fi
 
