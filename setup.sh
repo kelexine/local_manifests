@@ -14,6 +14,7 @@ readonly SCRIPT_NAME="$(basename "${0}")"
 readonly LOCAL_MANIFESTS_REPO="https://github.com/kelexine/local_manifests"
 readonly OTA_RELEASES_REPO="${OTA_RELEASES_REPO:-kelexine/cubot-marlon-rom-releases}"
 readonly OTA_RELEASES_DIR="${OTA_RELEASES_DIR:-${HOME}/cubot-marlon-rom-releases}"
+readonly CERTS_REPO="${ANDROID_CERTS_REPO:-kelexine/android-certs}"
 readonly SF_HOST="${OTA_SF_HOST:-frs.sourceforge.net}"
 readonly SF_USER="${OTA_SF_USER:-kelexine}"
 readonly TOTAL_CORES="$(nproc 2>/dev/null || echo 4)"
@@ -197,10 +198,26 @@ configure_signing_keys() {
     local keys_dir="${WORKSPACE_DIR}/vendor/lineage-priv/keys"
     local external_certs="${HOME}/android-certs"
 
-    if [[ ! -d "${keys_dir}" && -d "${external_certs}" ]]; then
+    if [[ ! -d "${external_certs}/.git" && ! -f "${external_certs}/releasekey.pk8" ]]; then
+        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+            log "Cloning private signing keys repository (${CERTS_REPO}) -> ${external_certs}..."
+            rm -rf "${external_certs}"
+            git -c "credential.helper=!gh auth git-credential" clone "https://github.com/${CERTS_REPO}.git" "${external_certs}" || \
+                warn "Could not clone ${CERTS_REPO}; proceeding without remote certs."
+        fi
+    elif [[ -d "${external_certs}/.git" ]]; then
+        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+            git -C "${external_certs}" -c "credential.helper=!gh auth git-credential" pull --ff-only origin main >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [[ -f "${external_certs}/releasekey.pk8" ]]; then
+        chmod 700 "${external_certs}" 2>/dev/null || true
+        chmod 600 "${external_certs}"/*.pk8 2>/dev/null || true
         log "Staging signing keys from ${external_certs} into ${keys_dir}..."
         mkdir -p "${keys_dir}"
-        cp -a "${external_certs}/"* "${keys_dir}/"
+        cp -af "${external_certs}"/*.pk8 "${external_certs}"/*.pem "${keys_dir}/"
+        chmod 600 "${keys_dir}"/*.pk8 2>/dev/null || true
     fi
 
     if [[ -d "${keys_dir}" ]]; then
