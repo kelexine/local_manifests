@@ -989,6 +989,9 @@ ensure_ota_repo_ready() {
 # Generate and optionally commit/push Axion Updater JSON
 write_ota_json() {
     [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]] || return 0
+    if [[ "${PRIMARY_ZIP}" == OrangeFox-*.zip || "${PRIMARY_ZIP}" == ofrp-*.zip || "${PRIMARY_ZIP}" == twrp-*.zip ]]; then
+        return 0
+    fi
 
     local json_filename="marlon.json"
     local rom_slug="rom"

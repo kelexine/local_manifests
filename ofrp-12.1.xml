@@ -4,4 +4,7 @@
 
     <!-- Cubot P50 (marlon) OrangeFox Recovery Project 12.1 Device Tree -->
     <project name="kelexine/ofrp_device_cubot_marlon" path="device/cubot/marlon" remote="github" revision="main" />
+
+    <!-- Cubot P50 (marlon) 4.19-CIP Kernel Source -->
+    <project name="kelexine/android_kernel_cubot_mt6765" path="kernel/cubot/marlon" remote="github" revision="marlon-cip" />
 </manifest>
