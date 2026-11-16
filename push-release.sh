@@ -39,10 +39,17 @@ TARGET_FILES_ARG=""
 TARGET_FILES_ZIP=""
 BASELINE_URL="${OTA_BASELINE_URL:-}"
 BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-https://sourceforge.net/projects/cubot-marlon-rom-releases/files/ota-baselines}"
+readonly GH_MAX_ASSET_BYTES=2097152000
 SF_DEST_DEFAULT="kelexine@frs.sourceforge.net:/home/frs/project/cubot-marlon-rom-releases/ota-baselines"
 SF_DEST="${OTA_SF_DEST:-${SF_DEST_DEFAULT}}"
+SF_RELEASES_DEST_DEFAULT="kelexine@frs.sourceforge.net:/home/frs/project/cubot-marlon-rom-releases/releases"
+SF_RELEASES_DEST="${OTA_SF_RELEASES_DEST:-${SF_RELEASES_DEST_DEFAULT}}"
+SF_RELEASES_BASE_URL="${OTA_RELEASES_BASE_URL:-https://sourceforge.net/projects/cubot-marlon-rom-releases/files/releases}"
 SKIP_SF=false
 SF_UPLOAD_OK=false
+PRIMARY_ON_SF=false
+PRIMARY_SF_URL=""
+SF_ROM_UPLOAD_OK=false
 SPLIT_BASELINE=false
 OTA_JSON_OUT=""
 OTA_JSON_PUSH_DIR="${OTA_RELEASES_DIR:-${HOME}/cubot-marlon-rom-releases}"
@@ -542,11 +549,30 @@ resolve_release_info() {
         RELEASE_TITLE="Custom ROM Build for Cubot P50 (marlon) - ${RELEASE_TAG}"
     fi
 
+    GH_UPLOAD_FILES=()
+    PRIMARY_ON_SF=false
+    PRIMARY_SF_URL=""
+    local primary_bytes=0
+    if [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]]; then
+        primary_bytes="$(stat -c%s "${PRODUCT_DIR}/${PRIMARY_ZIP}")"
+    fi
+    if [[ -n "${PRIMARY_ZIP}" && "${SKIP_SF}" != "true" ]] && (( primary_bytes > GH_MAX_ASSET_BYTES )); then
+        PRIMARY_ON_SF=true
+        PRIMARY_SF_URL="${SF_RELEASES_BASE_URL%/}/${RELEASE_TAG}/${PRIMARY_ZIP}/download"
+    fi
+    for f in "${UPLOAD_FILES[@]}"; do
+        if [[ "${PRIMARY_ON_SF}" == "true" && "${f}" == "${PRIMARY_ZIP}" ]]; then
+            continue
+        fi
+        GH_UPLOAD_FILES+=("${f}")
+    done
+
     log "Target Repository: ${TARGET_REPO}"
     log "Filesystem:        ${DETECTED_FS}"
     log "Release Tag:       ${RELEASE_TAG}"
     log "Release Title:     ${RELEASE_TITLE}"
     log "Pre-release:       ${IS_PRERELEASE}"
+    [[ "${PRIMARY_ON_SF}" == "true" ]] && log "Primary ROM (>2G): Offloading to SourceForge (${PRIMARY_SF_URL})"
     [[ -n "${TARGET_FILES_ZIP}" ]] && log "Target-Files ZIP:  ${TARGET_FILES_ZIP}"
 }
 
@@ -663,6 +689,13 @@ adb sideload ${PRIMARY_ZIP:-"rom.zip"}
 4. Reboot system.
 EOF
 
+    if [[ "${PRIMARY_ON_SF}" == "true" ]]; then
+        cat <<EOF >> "${NOTES_TMP}"
+
+> **Full ROM Download (SourceForge):** [\`${PRIMARY_ZIP}\`](${PRIMARY_SF_URL}) *(hosted on SourceForge because it exceeds GitHub's 2 GiB release asset limit; SHA-256 listed below)*.
+EOF
+    fi
+
     if [[ -n "${INCREMENTAL_ZIP}" ]]; then
         cat <<EOF >> "${NOTES_TMP}"
 
@@ -714,10 +747,13 @@ publish_release() {
         printf '%s\n' '--------------------------------------------------'
         cat "${NOTES_TMP}"
         printf '%s\n' '--------------------------------------------------'
-        log "[DRY-RUN] Files that would be uploaded:"
-        for f in "${UPLOAD_FILES[@]}"; do
+        log "[DRY-RUN] Files that would be uploaded to GitHub:"
+        for f in "${GH_UPLOAD_FILES[@]}"; do
             printf "  • %s\n" "${f}"
         done
+        if [[ "${PRIMARY_ON_SF}" == "true" ]]; then
+            log "[DRY-RUN] Oversized full ROM zip would be uploaded to SourceForge: ${PRIMARY_SF_URL}"
+        fi
         log "[DRY-RUN] Completed without modifying GitHub."
         return 0
     fi
@@ -741,7 +777,7 @@ publish_release() {
         gh release upload "${RELEASE_TAG}" \
             -R "${TARGET_REPO}" \
             --clobber \
-            "${UPLOAD_FILES[@]}"
+            "${GH_UPLOAD_FILES[@]}"
     else
         log "Creating new release '${RELEASE_TAG}' on ${TARGET_REPO}..."
         local extra_flags=()
@@ -753,7 +789,7 @@ publish_release() {
             --title "${RELEASE_TITLE}" \
             --notes-file "${NOTES_TMP}" \
             ${extra_flags[@]+"${extra_flags[@]}"} \
-            "${UPLOAD_FILES[@]}"
+            "${GH_UPLOAD_FILES[@]}"
     fi
 
     local release_url
@@ -764,51 +800,82 @@ publish_release() {
     log "=================================================="
 }
 
-# Upload target-files baseline to SourceForge FRS via rsync if configured
+sf_ensure_remote_dir() {
+    local remote_dest="$1"
+    shift
+    local -a sftp_opts=("$@")
+    command -v sftp >/dev/null 2>&1 || return 0
+    [[ "${remote_dest}" == *:* ]] || return 0
+    local sf_remote="${remote_dest%%:*}"
+    local sf_path="${remote_dest#*:}"
+    local sf_parent="${sf_path%/*}"
+    local sf_leaf="${sf_path##*/}"
+    if [[ -n "${sf_parent}" && -n "${sf_leaf}" ]]; then
+        local sf_grand="${sf_parent%/*}"
+        local sf_mid="${sf_parent##*/}"
+        [[ -n "${sf_grand}" && -n "${sf_mid}" ]] &&             sftp "${sftp_opts[@]}" "${sf_remote}:${sf_grand}/" <<< "mkdir ${sf_mid}" >/dev/null 2>&1 || true
+        sftp "${sftp_opts[@]}" "${sf_remote}:${sf_parent}/" <<< "mkdir ${sf_leaf}" >/dev/null 2>&1 || true
+    fi
+}
+
+# Upload target-files baseline (and >2GiB primary ROM zip if applicable) to SourceForge FRS
 upload_baseline_sourceforge() {
     SF_UPLOAD_OK=false
-    if [[ "${SKIP_SF}" == "true" || "${SPLIT_BASELINE}" == "true" || -z "${SF_DEST}" ]]; then
-        return 0
-    fi
-    if [[ -z "${TARGET_FILES_ZIP}" || ! -f "${TARGET_FILES_ZIP}" ]]; then
-        warn "No target-files baseline zip found; skipping SourceForge upload."
+    SF_ROM_UPLOAD_OK=false
+    if [[ "${SKIP_SF}" == "true" ]]; then
         return 0
     fi
 
+    local need_rom=false
+    local need_tf=false
+    [[ "${PRIMARY_ON_SF}" == "true" && -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]] && need_rom=true
+    [[ "${SPLIT_BASELINE}" != "true" && -n "${SF_DEST}" && -n "${TARGET_FILES_ZIP}" && -f "${TARGET_FILES_ZIP}" ]] && need_tf=true
+    [[ "${need_rom}" == "true" || "${need_tf}" == "true" ]] || return 0
+
     if [[ "${DRY_RUN}" == "true" ]]; then
-        SF_UPLOAD_OK=true
-        log "[DRY-RUN] Would rsync ${TARGET_FILES_ZIP} (+ .sha256) to SourceForge: ${SF_DEST}/"
+        [[ "${need_rom}" == "true" ]] && {
+            SF_ROM_UPLOAD_OK=true
+            log "[DRY-RUN] Would rsync ${PRIMARY_ZIP} (+ .sha256) to SourceForge: ${SF_RELEASES_DEST}/${RELEASE_TAG}/"
+        }
+        [[ "${need_tf}" == "true" ]] && {
+            SF_UPLOAD_OK=true
+            log "[DRY-RUN] Would rsync ${TARGET_FILES_ZIP} (+ .sha256) to SourceForge: ${SF_DEST}/"
+        }
         return 0
     fi
 
     command -v rsync >/dev/null 2>&1 || die "'rsync' is required for SourceForge upload (or pass --no-sf)."
-    local sha_file="${TARGET_FILES_ZIP}.sha256"
-    [[ -f "${sha_file}" ]] || sha256sum "${TARGET_FILES_ZIP}" > "${sha_file}"
-
     local sf_ssh="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no"
-    local -a sftp_opts=(-b /dev/null -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no)
+    local -a sftp_opts=(-b - -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no)
     if [[ -f "${HOME}/.ssh/sf_key" ]]; then
         sf_ssh="${sf_ssh} -i ${HOME}/.ssh/sf_key"
         sftp_opts+=(-i "${HOME}/.ssh/sf_key")
     fi
 
-    # Ensure remote directory exists when targeting user@host:/path/leaf
-    if command -v sftp >/dev/null 2>&1 && [[ "${SF_DEST}" == *:* ]]; then
-        local sf_remote="${SF_DEST%%:*}"
-        local sf_path="${SF_DEST#*:}"
-        local sf_parent="${sf_path%/*}"
-        local sf_leaf="${sf_path##*/}"
-        if [[ -n "${sf_parent}" && -n "${sf_leaf}" ]]; then
-            sftp "${sftp_opts[@]}" "${sf_remote}:${sf_parent}/" <<< "mkdir ${sf_leaf}" >/dev/null 2>&1 || true
+    if [[ "${need_rom}" == "true" ]]; then
+        local rom_dest="${SF_RELEASES_DEST%/}/${RELEASE_TAG}"
+        local rom_sha="${PRODUCT_DIR}/${PRIMARY_ZIP}.sha256"
+        [[ -f "${rom_sha}" ]] || (cd "${PRODUCT_DIR}" && sha256sum "${PRIMARY_ZIP}" > "${rom_sha}")
+        sf_ensure_remote_dir "${rom_dest}" "${sftp_opts[@]}"
+        log "Uploading >2GiB primary ROM zip to SourceForge (${rom_dest})..."
+        if ! rsync -avh --partial --progress -e "${sf_ssh}" "${PRODUCT_DIR}/${PRIMARY_ZIP}" "${rom_sha}" "${rom_dest}/"; then
+            die "SourceForge full-ROM upload failed. Reconnect with 'ssh -A' to forward ~/.ssh/sf_key and re-run ./push-release.sh."
         fi
+        SF_ROM_UPLOAD_OK=true
+        log "[+] Uploaded full ROM zip to SourceForge: ${rom_dest}/${PRIMARY_ZIP}"
     fi
 
-    log "Uploading target-files baseline to SourceForge (${SF_DEST})..."
-    if ! rsync -avh --partial --progress -e "${sf_ssh}" "${TARGET_FILES_ZIP}" "${sha_file}" "${SF_DEST}/"; then
-        die "SourceForge upload failed. On a remote server, reconnect with 'ssh -A' to forward ~/.ssh/sf_key (or pass --no-sf). GitHub Release assets were preserved; re-run ./push-release.sh after fixing SSH."
+    if [[ "${need_tf}" == "true" ]]; then
+        local sha_file="${TARGET_FILES_ZIP}.sha256"
+        [[ -f "${sha_file}" ]] || sha256sum "${TARGET_FILES_ZIP}" > "${sha_file}"
+        sf_ensure_remote_dir "${SF_DEST}" "${sftp_opts[@]}"
+        log "Uploading target-files baseline to SourceForge (${SF_DEST})..."
+        if ! rsync -avh --partial --progress -e "${sf_ssh}" "${TARGET_FILES_ZIP}" "${sha_file}" "${SF_DEST}/"; then
+            die "SourceForge baseline upload failed. On a remote server, reconnect with 'ssh -A' to forward ~/.ssh/sf_key (or pass --no-sf). Re-run ./push-release.sh after fixing SSH."
+        fi
+        SF_UPLOAD_OK=true
+        log "[+] Uploaded baseline to SourceForge: ${SF_DEST}/$(basename "${TARGET_FILES_ZIP}")"
     fi
-    SF_UPLOAD_OK=true
-    log "[+] Uploaded baseline to SourceForge: ${SF_DEST}/$(basename "${TARGET_FILES_ZIP}")"
 }
 
 ensure_ota_repo_ready() {
@@ -890,16 +957,21 @@ write_ota_json() {
         fi
     fi
 
+    local resolved_primary_url="https://github.com/${TARGET_REPO}/releases/download/${RELEASE_TAG}/${PRIMARY_ZIP}"
+    if [[ "${PRIMARY_ON_SF}" == "true" && "${SF_ROM_UPLOAD_OK}" == "true" && -n "${PRIMARY_SF_URL}" ]]; then
+        resolved_primary_url="${PRIMARY_SF_URL}"
+    fi
+
     local json_payload
     json_payload="$(python3 - \
         "${PRODUCT_DIR}" "${PRIMARY_ZIP}" "${TARGET_REPO}" "${RELEASE_TAG}" \
         "${ROM_VERSION:-2.9}" "${ROM_TYPE_TAG:-UNOFFICIAL}" \
-        "${INCREMENTAL_ZIP}" "${TARGET_FILES_ZIP}" "${resolved_tf_url}" "${parts_joined}" <<'PY'
+        "${INCREMENTAL_ZIP}" "${TARGET_FILES_ZIP}" "${resolved_tf_url}" "${parts_joined}" "${resolved_primary_url}" <<'PY'
 import hashlib, json, pathlib, re, sys, time
 
 (
     product_dir, primary_zip, repo, tag,
-    version, romtype, incr_zip, tf_zip, tf_url, parts_raw
+    version, romtype, incr_zip, tf_zip, tf_url, parts_raw, primary_url
 ) = sys.argv[1:]
 
 pdir = pathlib.Path(product_dir)
@@ -938,7 +1010,7 @@ entry = {
     "id": md5_file(primary_path),
     "romtype": romtype,
     "size": primary_path.stat().st_size,
-    "url": f"{base_url}/{primary_zip}",
+    "url": primary_url,
     "version": version,
 }
 
@@ -1031,8 +1103,8 @@ main() {
     collect_assets
     resolve_release_info
     generate_release_notes
-    publish_release
     upload_baseline_sourceforge
+    publish_release
     write_ota_json
 }
 

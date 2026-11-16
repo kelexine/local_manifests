@@ -23,7 +23,7 @@ fi
 readonly DEVICE="marlon"
 
 TARGET_VARIANT="userdebug"
-TARGET_GAPPS_VARIANT="core"
+TARGET_GAPPS_VARIANT="gms"
 BUILD_TYPE="-b"
 JOB_COUNT=""
 ENABLE_PERF=true
@@ -32,6 +32,7 @@ ENABLE_RBE=false
 CLEAR_RBE=false
 SKIP_GLOBS=false
 KERNEL_ONLY=false
+POST_ONLY=false
 AUTO_RELEASE=false
 ARCHIVE_BASELINE=true
 BUILD_INCREMENTAL=true
@@ -78,7 +79,7 @@ Build Variants:
   user | userdebug | eng          (default: userdebug)
 
 GApps Variants:
-  core | gms | pico | full | vanilla (default: core)
+  gms | core | pico | full | vanilla (default: gms)
 
 Build Types:
   -b                              Bacon (full flashable ZIP, default)
@@ -93,6 +94,7 @@ Optimizations & Options:
   --clear-rbe                     Discard local RBE action cache via clearRBECache
   --skip-globs                    Skip ninja globs via skipGlobs 1
   --kernel-only, bKernel, -k      Build only inline kernel, dtbs, and in-tree modules
+  --post-only                     Skip ROM build; run post-build baseline, incremental OTA, and release steps
   --no-baseline                   Skip packaging target-files baseline zip after bacon build
   --incremental / --no-incremental Generate incremental OTA zip (default: enabled for -b)
   --incremental-from <zip|url>    Explicit previous target-files zip path or URL for incremental OTA
@@ -158,6 +160,9 @@ parse_arguments() {
                 ;;
             --kernel-only|bKernel|-k)
                 KERNEL_ONLY=true
+                ;;
+            --post-only)
+                POST_ONLY=true
                 ;;
             --no-baseline)
                 ARCHIVE_BASELINE=false
@@ -440,8 +445,12 @@ package_and_archive_baseline() {
     fi
 
     if [[ -x "${soong_zip}" && -d "${tf_interm}" && -f "${tf_interm}.zip.list" ]]; then
+        local tf_interm_rel="${tf_interm#"${WORKSPACE_ROOT}/"}"
         log "Packaging target-files baseline via soong_zip -> ${archive_zip}"
-        "${soong_zip}" -d -o "${archive_zip}" -C "${tf_interm}" -r "${tf_interm}.zip.list" -sha256 || die "soong_zip target-files packaging failed."
+        (
+            cd "${WORKSPACE_ROOT}"
+            "${soong_zip}" -d -o "${archive_zip}" -C "${tf_interm_rel}" -r "${tf_interm}.zip.list" -sha256
+        ) || die "soong_zip target-files packaging failed."
     else
         log "Building target-files-package via mka..."
         mka target-files-package || die "target-files-package build failed."
@@ -635,7 +644,7 @@ generate_incremental_ota() {
     log "Generating incremental OTA (${prev_date} -> ${curr_date})..."
     log "  Source baseline: ${PREV_TARGET_FILES_ZIP}"
     log "  Target baseline: ${CURRENT_TARGET_FILES_ZIP}"
-    "${ota_tool}" \
+    PATH="${WORKSPACE_ROOT}/out/host/linux-x86/bin:${PATH}" "${ota_tool}" \
         --verbose \
         --path "${WORKSPACE_ROOT}/out/host/linux-x86" \
         -k "${key_pair}" \
@@ -649,22 +658,28 @@ generate_incremental_ota() {
 }
 
 build_rom_package() {
-    log "Starting AxionOS ROM packaging (${BUILD_TYPE})..."
-    local -a job_args=()
-    if [[ -n "${JOB_COUNT}" ]]; then
-        job_args=("-j${JOB_COUNT}")
-    fi
-
-    if declare -F ax >/dev/null; then
-        log "Running: ax ${BUILD_TYPE} ${job_args[*]} ${TARGET_VARIANT}"
-        ax "${BUILD_TYPE}" "${job_args[@]}" "${TARGET_VARIANT}" || die "Axion build (${BUILD_TYPE}) failed."
-    else
-        log "ax command not found in environment; falling back to mka bacon..."
-        mka bacon "${job_args[@]}" || die "AxionOS packaging failed."
-    fi
-
     local out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
-    log "[+] Build completed successfully!"
+
+    if [[ "${POST_ONLY}" == "true" ]]; then
+        log "Skipping ROM compilation (--post-only); continuing post-build packaging..."
+    else
+        log "Starting AxionOS ROM packaging (${BUILD_TYPE})..."
+        local -a job_args=()
+        if [[ -n "${JOB_COUNT}" ]]; then
+            job_args=("-j${JOB_COUNT}")
+        fi
+
+        if declare -F ax >/dev/null; then
+            log "Running: ax ${BUILD_TYPE} ${job_args[*]} ${TARGET_VARIANT}"
+            ax "${BUILD_TYPE}" "${job_args[@]}" "${TARGET_VARIANT}" || die "Axion build (${BUILD_TYPE}) failed."
+        else
+            log "ax command not found in environment; falling back to mka bacon..."
+            mka bacon "${job_args[@]}" || die "AxionOS packaging failed."
+        fi
+
+        out_target="${OUT:-${ANDROID_PRODUCT_OUT:-${WORKSPACE_ROOT}/out/target/product/${DEVICE}}}"
+        log "[+] Build completed successfully!"
+    fi
     log "[+] Output images located at: ${out_target}"
 
     package_and_archive_baseline "${out_target}"
@@ -730,8 +745,10 @@ main() {
 
     verify_prerequisites
     warn_release_prerequisites
-    setup_kernel_toolchain_env
-    init_android_environment
+    if [[ "${POST_ONLY}" != "true" ]]; then
+        setup_kernel_toolchain_env
+        init_android_environment
+    fi
 
     if [[ "${KERNEL_ONLY}" == "true" ]]; then
         if declare -F bKernel >/dev/null; then
