@@ -39,10 +39,15 @@ TARGET_FILES_ARG=""
 TARGET_FILES_ZIP=""
 BASELINE_URL="${OTA_BASELINE_URL:-}"
 BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-https://sourceforge.net/projects/cubot-marlon-rom-releases/files/ota-baselines}"
-SF_DEST="${OTA_SF_DEST:-}"
+SF_DEST_DEFAULT="kelexine@frs.sourceforge.net:/home/frs/project/cubot-marlon-rom-releases/ota-baselines"
+SF_DEST="${OTA_SF_DEST:-${SF_DEST_DEFAULT}}"
+SKIP_SF=false
+SF_UPLOAD_OK=false
 SPLIT_BASELINE=false
 OTA_JSON_OUT=""
-OTA_JSON_PUSH_DIR=""
+OTA_JSON_PUSH_DIR="${OTA_RELEASES_DIR:-${HOME}/cubot-marlon-rom-releases}"
+SKIP_OTA_PUSH=false
+OTA_VARIANT="GMS"
 IS_DRAFT=false
 IS_PRERELEASE=false
 DRY_RUN=false
@@ -69,12 +74,14 @@ Options:
       --fs <auto|erofs|ext4>   Override super partition filesystem detection (default: auto).
   -i, --incremental <file>     Incremental OTA zip (auto-discovered in product dir if omitted).
   -b, --target-files <file>    Target-files baseline zip (auto-checks ~/ota-baselines/).
-      --baseline-url <url>     Explicit download URL for target_files in generated marlon.json.
+      --baseline-url <url>     Explicit download URL for target_files in generated OTA JSON.
       --baseline-base-url <u>  Base URL directory used to construct target_files.url (SourceForge-aware).
-      --sf-dest <rsync-dest>   Optional SourceForge FRS rsync target for target-files.zip + .sha256.
+      --sf-dest <rsync-dest>   SourceForge FRS rsync target (default: kelexine@frs.sourceforge.net:.../ota-baselines).
+      --no-sf                  Skip SourceForge target-files baseline upload.
       --split-baseline         Split >1900MiB target-files.zip into <=1800MiB GitHub Release parts.
-      --ota-json-out <file>    Output path for Axion Updater marlon.json (default: <product-dir>/marlon.json).
-      --ota-json-push <dir>    Git checkout containing --ota-json-out to commit (-s) & push automatically.
+      --ota-json-out <file>    Output path for Updater JSON (default: <ota-repo>/OTA/<variant>/<rom>.json).
+      --ota-json-push <dir>    Git checkout to commit (-s) & push OTA JSON (default: ~/cubot-marlon-rom-releases).
+      --no-ota-push            Write OTA JSON locally without committing/pushing to cubot-marlon-rom-releases.
       --draft                  Publish as a draft release.
       --prerelease             Mark as pre-release.
       --dry-run                Simulate asset discovery, notes, and JSON generation without uploading.
@@ -162,6 +169,11 @@ parse_args() {
                 SF_DEST="$2"
                 shift 2
                 ;;
+            --no-sf)
+                SKIP_SF=true
+                SF_DEST=""
+                shift
+                ;;
             --split-baseline)
                 SPLIT_BASELINE=true
                 shift
@@ -175,6 +187,11 @@ parse_args() {
                 [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
                 OTA_JSON_PUSH_DIR="$2"
                 shift 2
+                ;;
+            --no-ota-push)
+                SKIP_OTA_PUSH=true
+                OTA_JSON_PUSH_DIR=""
+                shift
                 ;;
             --draft)
                 IS_DRAFT=true
@@ -312,7 +329,6 @@ collect_assets() {
         if [[ "${PRIMARY_ZIP}" =~ axion-([0-9.]+)-([A-Za-z0-9_]+)-([0-9]{8})-(.*)\.zip ]]; then
             ROM_FLAVOR="AxionOS"
             ROM_VERSION="${BASH_REMATCH[1]}"
-            local codename="${BASH_REMATCH[2]}"
             BUILD_DATE="${BASH_REMATCH[3]}"
             BUILD_TAG_SUGGESTION="v${ROM_VERSION}-${BUILD_DATE}"
             if [[ "${BASH_REMATCH[4]}" =~ ^(OFFICIAL|UNOFFICIAL|COMMUNITY)- ]]; then
@@ -323,6 +339,12 @@ collect_assets() {
             ROM_VERSION="${BASH_REMATCH[1]}"
             BUILD_DATE="${BASH_REMATCH[2]}"
             BUILD_TAG_SUGGESTION="lineage-${ROM_VERSION}-${BUILD_DATE}"
+        fi
+
+        if [[ "${PRIMARY_ZIP}" =~ -(VANILLA|vanilla)- ]]; then
+            OTA_VARIANT="VANILLA"
+        else
+            OTA_VARIANT="GMS"
         fi
     else
         warn "No ROM zip (axion-*.zip / lineage-*.zip) found in ${PRODUCT_DIR}. Proceeding with partition images only."
@@ -348,13 +370,27 @@ collect_assets() {
         UPLOAD_FILES+=("${INCREMENTAL_ZIP}")
     fi
 
-    # 1c. Resolve target-files baseline zip (for JSON metadata / optional split or SF upload)
+    # 1c. Resolve target-files baseline zip (exact UTC match first, then date fallback)
+    local build_utc=""
+    for prop_candidate in \
+        "${PRODUCT_DIR}/system/build.prop" \
+        "${PRODUCT_DIR}/obj/PACKAGING/target_files_intermediates/lineage_marlon-target_files/SYSTEM/build.prop"; do
+        if [[ -f "${prop_candidate}" ]]; then
+            build_utc="$(grep -m1 '^ro\.build\.date\.utc=' "${prop_candidate}" | cut -d'=' -f2 | tr -d '\r\n' || true)"
+            [[ -n "${build_utc}" ]] && break
+        fi
+    done
+
     TARGET_FILES_ZIP=""
     if [[ -n "${TARGET_FILES_ARG}" ]]; then
         [[ -f "${TARGET_FILES_ARG}" ]] || die "Target-files zip not found: ${TARGET_FILES_ARG}"
         TARGET_FILES_ZIP="$(cd "$(dirname "${TARGET_FILES_ARG}")" && pwd)/$(basename "${TARGET_FILES_ARG}")"
-    elif [[ -n "${BUILD_DATE}" && -f "${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip" ]]; then
-        TARGET_FILES_ZIP="${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip"
+    elif [[ -n "${BUILD_DATE}" ]]; then
+        if [[ -n "${build_utc}" && -f "${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}-${build_utc}.zip" ]]; then
+            TARGET_FILES_ZIP="${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}-${build_utc}.zip"
+        elif [[ -f "${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip" ]]; then
+            TARGET_FILES_ZIP="${HOME}/ota-baselines/marlon-target_files-${BUILD_DATE}.zip"
+        fi
     fi
 
     SPLIT_PARTS=()
@@ -730,20 +766,80 @@ publish_release() {
 
 # Upload target-files baseline to SourceForge FRS via rsync if configured
 upload_baseline_sourceforge() {
-    [[ -n "${SF_DEST}" ]] || return 0
+    SF_UPLOAD_OK=false
+    if [[ "${SKIP_SF}" == "true" || "${SPLIT_BASELINE}" == "true" || -z "${SF_DEST}" ]]; then
+        return 0
+    fi
     if [[ -z "${TARGET_FILES_ZIP}" || ! -f "${TARGET_FILES_ZIP}" ]]; then
-        warn "--sf-dest specified, but no target-files zip was found; skipping SourceForge upload."
+        warn "No target-files baseline zip found; skipping SourceForge upload."
         return 0
     fi
 
     if [[ "${DRY_RUN}" == "true" ]]; then
+        SF_UPLOAD_OK=true
         log "[DRY-RUN] Would rsync ${TARGET_FILES_ZIP} (+ .sha256) to SourceForge: ${SF_DEST}/"
         return 0
     fi
 
-    command -v rsync >/dev/null 2>&1 || die "'rsync' is required for --sf-dest SourceForge upload."
+    command -v rsync >/dev/null 2>&1 || die "'rsync' is required for SourceForge upload (or pass --no-sf)."
+    local sha_file="${TARGET_FILES_ZIP}.sha256"
+    [[ -f "${sha_file}" ]] || sha256sum "${TARGET_FILES_ZIP}" > "${sha_file}"
+
+    local sf_ssh="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no"
+    local -a sftp_opts=(-b /dev/null -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no)
+    if [[ -f "${HOME}/.ssh/sf_key" ]]; then
+        sf_ssh="${sf_ssh} -i ${HOME}/.ssh/sf_key"
+        sftp_opts+=(-i "${HOME}/.ssh/sf_key")
+    fi
+
+    # Ensure remote directory exists when targeting user@host:/path/leaf
+    if command -v sftp >/dev/null 2>&1 && [[ "${SF_DEST}" == *:* ]]; then
+        local sf_remote="${SF_DEST%%:*}"
+        local sf_path="${SF_DEST#*:}"
+        local sf_parent="${sf_path%/*}"
+        local sf_leaf="${sf_path##*/}"
+        if [[ -n "${sf_parent}" && -n "${sf_leaf}" ]]; then
+            sftp "${sftp_opts[@]}" "${sf_remote}:${sf_parent}/" <<< "mkdir ${sf_leaf}" >/dev/null 2>&1 || true
+        fi
+    fi
+
     log "Uploading target-files baseline to SourceForge (${SF_DEST})..."
-    rsync -avP --partial "${TARGET_FILES_ZIP}" "${TARGET_FILES_ZIP}.sha256" "${SF_DEST}/"
+    if ! rsync -avh --partial --progress -e "${sf_ssh}" "${TARGET_FILES_ZIP}" "${sha_file}" "${SF_DEST}/"; then
+        die "SourceForge upload failed. On a remote server, reconnect with 'ssh -A' to forward ~/.ssh/sf_key (or pass --no-sf). GitHub Release assets were preserved; re-run ./push-release.sh after fixing SSH."
+    fi
+    SF_UPLOAD_OK=true
+    log "[+] Uploaded baseline to SourceForge: ${SF_DEST}/$(basename "${TARGET_FILES_ZIP}")"
+}
+
+ensure_ota_repo_ready() {
+    local repo_dir="$1"
+    local gh_cred='!gh auth git-credential'
+
+    if [[ ! -d "${repo_dir}/.git" ]]; then
+        log "Cloning ${TARGET_REPO} -> ${repo_dir}..."
+        mkdir -p "$(dirname "${repo_dir}")"
+        if ! git -c "credential.helper=${gh_cred}" clone "https://github.com/${TARGET_REPO}.git" "${repo_dir}"; then
+            die "Failed to clone ${TARGET_REPO} into ${repo_dir}."
+        fi
+    elif [[ -z "$(git -C "${repo_dir}" status --porcelain 2>/dev/null)" ]]; then
+        log "Syncing ${repo_dir} with origin/main..."
+        git -C "${repo_dir}" -c "credential.helper=${gh_cred}" pull --ff-only origin main || \
+            warn "Could not fast-forward ${repo_dir}; proceeding cautiously."
+    fi
+
+    if [[ -z "$(git -C "${repo_dir}" config user.name || true)" ]]; then
+        local g_name=""
+        g_name="$(gh api user -q '.name // .login' 2>/dev/null || true)"
+        [[ -n "${g_name}" ]] && git -C "${repo_dir}" config user.name "${g_name}"
+    fi
+    if [[ -z "$(git -C "${repo_dir}" config user.email || true)" ]]; then
+        local g_email=""
+        g_email="$(gh api user/emails -q 'map(select(.primary and .verified)) | .[0].email // empty' 2>/dev/null || true)"
+        if [[ -z "${g_email}" ]]; then
+            g_email="$(gh api user -q '"\(.id)+\(.login)@users.noreply.github.com"' 2>/dev/null || true)"
+        fi
+        [[ -n "${g_email}" ]] && git -C "${repo_dir}" config user.email "${g_email}"
+    fi
 }
 
 # Generate and optionally commit/push Axion Updater JSON
@@ -751,18 +847,40 @@ write_ota_json() {
     [[ -n "${PRIMARY_ZIP}" && -f "${PRODUCT_DIR}/${PRIMARY_ZIP}" ]] || return 0
 
     local json_filename="marlon.json"
+    local rom_slug="rom"
     case "${ROM_FLAVOR}" in
-        AxionOS) json_filename="axion.json" ;;
-        LineageOS) json_filename="lineage.json" ;;
+        AxionOS)
+            json_filename="axion.json"
+            rom_slug="axion"
+            ;;
+        LineageOS)
+            json_filename="lineage.json"
+            rom_slug="lineage"
+            ;;
     esac
-    local json_out="${OTA_JSON_OUT:-${PRODUCT_DIR}/${json_filename}}"
+
+    local push_dir=""
+    if [[ "${SKIP_OTA_PUSH}" != "true" && -n "${OTA_JSON_PUSH_DIR}" ]]; then
+        push_dir="${OTA_JSON_PUSH_DIR}"
+        [[ "${DRY_RUN}" == "true" ]] || ensure_ota_repo_ready "${push_dir}"
+    fi
+
+    local json_out="${OTA_JSON_OUT}"
+    if [[ -z "${json_out}" ]]; then
+        if [[ -n "${push_dir}" ]]; then
+            json_out="${push_dir}/OTA/${OTA_VARIANT}/${json_filename}"
+        else
+            json_out="${PRODUCT_DIR}/${json_filename}"
+        fi
+    fi
+
     local parts_joined=""
     if [[ ${#SPLIT_PARTS[@]} -gt 0 ]]; then
         parts_joined="$(printf '%s\n' "${SPLIT_PARTS[@]}")"
     fi
 
     local resolved_tf_url="${BASELINE_URL}"
-    if [[ -z "${resolved_tf_url}" && "${SPLIT_BASELINE}" != "true" && -n "${BASELINE_BASE_URL}" && -n "${TARGET_FILES_ZIP}" ]]; then
+    if [[ -z "${resolved_tf_url}" && "${SPLIT_BASELINE}" != "true" && "${SF_UPLOAD_OK}" == "true" && -n "${BASELINE_BASE_URL}" && -n "${TARGET_FILES_ZIP}" ]]; then
         local tf_name
         tf_name="$(basename "${TARGET_FILES_ZIP}")"
         if [[ "${BASELINE_BASE_URL}" == *"sourceforge.net"* ]]; then
@@ -840,7 +958,6 @@ if incr_zip and (pdir / incr_zip).is_file():
 if tf_zip and pathlib.Path(tf_zip).is_file():
     tf_path = pathlib.Path(tf_zip)
     sha_sidecar = pathlib.Path(str(tf_path) + ".sha256")
-    tf_sha = ""
     if sha_sidecar.is_file():
         tf_sha = sha_sidecar.read_text(encoding="utf-8").strip().split()[0]
     else:
@@ -874,32 +991,35 @@ PY
 )"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log "[DRY-RUN] Would write Axion OTA JSON (${json_out}):"
+        log "[DRY-RUN] Would write OTA JSON (${json_out}) [variant: ${OTA_VARIANT}]:"
         printf '%s\n' "${json_payload}"
         return 0
     fi
 
     mkdir -p "$(dirname "${json_out}")"
     printf '%s\n' "${json_payload}" > "${json_out}"
-    log "[+] Wrote Axion OTA JSON: ${json_out}"
+    log "[+] Wrote OTA JSON (${OTA_VARIANT}): ${json_out}"
 
+    if [[ "${json_out}" != "${PRODUCT_DIR}/${json_filename}" ]]; then
+        printf '%s\n' "${json_payload}" > "${PRODUCT_DIR}/${json_filename}"
+    fi
     if [[ -d "${HOME}/ota-baselines" && "$(cd "$(dirname "${json_out}")" && pwd)/$(basename "${json_out}")" != "${HOME}/ota-baselines/${json_filename}" ]]; then
         printf '%s\n' "${json_payload}" > "${HOME}/ota-baselines/${json_filename}"
         log "[+] Mirrored OTA JSON: ${HOME}/ota-baselines/${json_filename}"
     fi
 
-    if [[ -n "${OTA_JSON_PUSH_DIR}" ]]; then
-        [[ -d "${OTA_JSON_PUSH_DIR}/.git" ]] || die "--ota-json-push directory is not a git repo: ${OTA_JSON_PUSH_DIR}"
+    if [[ -n "${push_dir}" ]]; then
+        [[ -d "${push_dir}/.git" ]] || die "--ota-json-push directory is not a git repo: ${push_dir}"
         local rel_json
-        rel_json="$(realpath --relative-to="${OTA_JSON_PUSH_DIR}" "${json_out}" 2>/dev/null || true)"
-        [[ -n "${rel_json}" && "${rel_json}" != ../* ]] || die "--ota-json-out (${json_out}) must be inside --ota-json-push (${OTA_JSON_PUSH_DIR})."
-        if ! git -C "${OTA_JSON_PUSH_DIR}" diff --quiet -- "${rel_json}" || [[ -n "$(git -C "${OTA_JSON_PUSH_DIR}" status --porcelain -- "${rel_json}")" ]]; then
-            git -C "${OTA_JSON_PUSH_DIR}" add "${rel_json}"
-            git -C "${OTA_JSON_PUSH_DIR}" commit -s -m "ota(axion): update ${RELEASE_TAG} release JSON"
-            git -C "${OTA_JSON_PUSH_DIR}" push
-            log "[+] Committed and pushed updated OTA JSON in ${OTA_JSON_PUSH_DIR}"
+        rel_json="$(realpath --relative-to="${push_dir}" "${json_out}" 2>/dev/null || true)"
+        [[ -n "${rel_json}" && "${rel_json}" != ../* ]] || die "--ota-json-out (${json_out}) must be inside --ota-json-push (${push_dir})."
+        if ! git -C "${push_dir}" diff --quiet -- "${rel_json}" || [[ -n "$(git -C "${push_dir}" status --porcelain -- "${rel_json}")" ]]; then
+            git -C "${push_dir}" add "${rel_json}"
+            git -C "${push_dir}" commit -s -m "ota(${rom_slug}): update ${RELEASE_TAG} (${OTA_VARIANT}) manifest"
+            git -C "${push_dir}" -c "credential.helper=!gh auth git-credential" push origin HEAD:main
+            log "[+] Committed and pushed updated OTA JSON in ${push_dir} (${rel_json})"
         else
-            log "OTA JSON unchanged in ${OTA_JSON_PUSH_DIR}; skipping git commit."
+            log "OTA JSON unchanged in ${push_dir}; skipping git commit."
         fi
     fi
 }

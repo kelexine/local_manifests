@@ -34,7 +34,7 @@ SKIP_GLOBS=false
 KERNEL_ONLY=false
 AUTO_RELEASE=false
 ARCHIVE_BASELINE=true
-BUILD_INCREMENTAL=false
+BUILD_INCREMENTAL=true
 INCREMENTAL_FROM=""
 OTA_JSON_SOURCE="${OTA_JSON_URL:-}"
 BASELINE_DIR="${HOME}/ota-baselines"
@@ -42,6 +42,8 @@ OTA_JSON_OUT=""
 BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-}"
 BASELINE_URL="${OTA_BASELINE_URL:-}"
 SF_DEST="${OTA_SF_DEST:-}"
+SKIP_SF=false
+SKIP_OTA_PUSH=false
 SPLIT_BASELINE=false
 RELEASE_TAG_OVERRIDE=""
 RELEASE_PRERELEASE=false
@@ -92,24 +94,26 @@ Optimizations & Options:
   --skip-globs                    Skip ninja globs via skipGlobs 1
   --kernel-only, bKernel, -k      Build only inline kernel, dtbs, and in-tree modules
   --no-baseline                   Skip packaging target-files baseline zip after bacon build
-  --incremental                   Generate incremental OTA zip from previous baseline (via --ota-json or cache)
+  --incremental / --no-incremental Generate incremental OTA zip (default: enabled for -b)
   --incremental-from <zip|url>    Explicit previous target-files zip path or URL for incremental OTA
   --ota-json <url|file>           OTA JSON URL/path to resolve previous target-files baseline (env: OTA_JSON_URL)
   --baseline-dir <dir>            Directory to cache/archive target-files zips (default: ~/ota-baselines)
   --baseline-url <url>            Explicit target-files download URL passed to push-release.sh (env: OTA_BASELINE_URL)
   --baseline-base-url <url>       Base URL for uploaded target-files baseline (env: OTA_BASELINE_BASE_URL)
   --sf-dest <rsync-dest>          SourceForge FRS rsync target for baseline upload (env: OTA_SF_DEST)
+  --no-sf                         Skip SourceForge target-files upload when releasing
+  --no-ota-push                   Skip automatic commit & push to cubot-marlon-rom-releases when releasing
   --split-baseline                Split target-files zip into <=1.8GiB GitHub Release parts if not using external host
-  --ota-json-out <file>           Output path for updated marlon.json passed to push-release.sh
+  --ota-json-out <file>           Output path for updated axion.json passed to push-release.sh
   --tag <tag>                     Explicit GitHub release tag passed to push-release.sh
   --prerelease                    Mark GitHub release as pre-release
-  --release, -r                   Push completed build artifacts (full + incremental) via push-release.sh
+  --release, -r                   Push completed build artifacts (GitHub + SourceForge + OTA JSON)
 
 Examples:
-  ./build.sh userdebug
-  ./build.sh user core -b -j192
-  ./build.sh userdebug core -b --incremental --ota-json https://raw.githubusercontent.com/.../marlon.json --release
-  ./build.sh userdebug vanilla --skip-globs
+  ./build.sh
+  ./build.sh -r
+  ./build.sh user core -b -j192 --release
+  ./build.sh userdebug vanilla --no-incremental
   ./build.sh --kernel-only
 EOF
 }
@@ -161,6 +165,9 @@ parse_arguments() {
             --incremental)
                 BUILD_INCREMENTAL=true
                 ;;
+            --no-incremental)
+                BUILD_INCREMENTAL=false
+                ;;
             --incremental-from)
                 [[ -n "${2:-}" ]] || die "Option $1 requires a path or URL."
                 BUILD_INCREMENTAL=true
@@ -191,6 +198,12 @@ parse_arguments() {
                 [[ -n "${2:-}" ]] || die "Option $1 requires an rsync destination."
                 SF_DEST="$2"
                 shift
+                ;;
+            --no-sf)
+                SKIP_SF=true
+                ;;
+            --no-ota-push)
+                SKIP_OTA_PUSH=true
                 ;;
             --split-baseline)
                 SPLIT_BASELINE=true
@@ -244,6 +257,35 @@ format_duration() {
         printf "%dm %02ds (%ds)" "${mins}" "${secs}" "${total_secs}"
     else
         printf "%ds" "${total_secs}"
+    fi
+}
+
+resolve_push_script() {
+    if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
+        echo "${WORKSPACE_ROOT}/push-release.sh"
+    elif [[ -x "${SCRIPT_DIR}/push-release.sh" ]]; then
+        echo "${SCRIPT_DIR}/push-release.sh"
+    elif [[ -x "${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh" ]]; then
+        echo "${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh"
+    elif command -v push-release.sh >/dev/null 2>&1; then
+        command -v push-release.sh
+    fi
+}
+
+warn_release_prerequisites() {
+    [[ "${AUTO_RELEASE}" == "true" && "${KERNEL_ONLY}" != "true" ]] || return 0
+    if [[ -z "$(resolve_push_script)" ]]; then
+        warn "Release requested (-r), but push-release.sh not found; build will proceed and fail at release step."
+    fi
+    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+        warn "Release requested (-r), but GitHub CLI is not authenticated; build will proceed and fail at upload."
+    fi
+    if [[ "${SKIP_SF}" != "true" && "${SPLIT_BASELINE}" != "true" ]]; then
+        local -a sftp_opts=(-b /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no)
+        [[ -f "${HOME}/.ssh/sf_key" ]] && sftp_opts+=(-i "${HOME}/.ssh/sf_key")
+        if ! command -v sftp >/dev/null 2>&1 || ! sftp "${sftp_opts[@]}" "kelexine@frs.sourceforge.net:/home/frs/project/cubot-marlon-rom-releases/" >/dev/null 2>&1; then
+            warn "Release requested (-r), but SourceForge FRS SSH is not active (did you pass ssh -A?); build will proceed and fail at upload."
+        fi
     fi
 }
 
@@ -641,16 +683,8 @@ build_rom_package() {
     fi
 
     if [[ "${AUTO_RELEASE}" == "true" ]]; then
-        local push_script=""
-        if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
-            push_script="${WORKSPACE_ROOT}/push-release.sh"
-        elif [[ -x "${SCRIPT_DIR}/push-release.sh" ]]; then
-            push_script="${SCRIPT_DIR}/push-release.sh"
-        elif [[ -x "${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh" ]]; then
-            push_script="${WORKSPACE_ROOT}/.repo/local_manifests/push-release.sh"
-        elif command -v push-release.sh >/dev/null 2>&1; then
-            push_script="$(command -v push-release.sh)"
-        fi
+        local push_script
+        push_script="$(resolve_push_script)"
 
         if [[ -n "${push_script}" ]]; then
             local -a release_args=()
@@ -659,19 +693,21 @@ build_rom_package() {
             [[ -n "${BASELINE_URL}" ]] && release_args+=("--baseline-url" "${BASELINE_URL}")
             [[ -n "${BASELINE_BASE_URL}" ]] && release_args+=("--baseline-base-url" "${BASELINE_BASE_URL}")
             [[ -n "${SF_DEST}" ]] && release_args+=("--sf-dest" "${SF_DEST}")
+            [[ "${SKIP_SF}" == "true" ]] && release_args+=("--no-sf")
+            [[ "${SKIP_OTA_PUSH}" == "true" ]] && release_args+=("--no-ota-push")
             [[ "${SPLIT_BASELINE}" == "true" ]] && release_args+=("--split-baseline")
             [[ -n "${OTA_JSON_OUT}" ]] && release_args+=("--ota-json-out" "${OTA_JSON_OUT}")
             [[ -n "${RELEASE_TAG_OVERRIDE}" ]] && release_args+=("--tag" "${RELEASE_TAG_OVERRIDE}")
             [[ "${RELEASE_PRERELEASE}" == "true" ]] && release_args+=("--prerelease")
 
-            log "Triggering automatic GitHub release push via ${push_script}..."
-            "${push_script}" "${release_args[@]}" "${out_target}" || warn "Release upload failed or was skipped."
+            log "Triggering automatic release push via ${push_script}..."
+            "${push_script}" "${release_args[@]}" "${out_target}" || die "Release upload failed."
         else
-            warn "Automatic release requested (-r/--release), but push-release.sh was not found or is not executable!"
+            die "Automatic release requested (-r/--release), but push-release.sh was not found or is not executable."
         fi
     else
-        log "[*] To publish this build to GitHub Releases, run:"
-        log "    ./push-release.sh ${out_target}"
+        log "[*] To publish this build (GitHub Release + SourceForge + OTA JSON), run:"
+        log "    ./push-release.sh"
     fi
 }
 
@@ -686,11 +722,14 @@ main() {
     log "  Variant:      ${TARGET_VARIANT}"
     log "  GApps:        ${TARGET_GAPPS_VARIANT}"
     log "  Build Type:   ${BUILD_TYPE}"
+    log "  Incremental:  ${BUILD_INCREMENTAL}"
+    log "  Auto Release: ${AUTO_RELEASE}"
     [[ -n "${JOB_COUNT}" ]] && log "  Job Count:    ${JOB_COUNT}"
     log "  Log File:     ${LOG_FILE}"
     log "=================================================="
 
     verify_prerequisites
+    warn_release_prerequisites
     setup_kernel_toolchain_env
     init_android_environment
 

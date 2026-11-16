@@ -12,6 +12,10 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="$(basename "${0}")"
 readonly LOCAL_MANIFESTS_REPO="https://github.com/kelexine/local_manifests"
+readonly OTA_RELEASES_REPO="${OTA_RELEASES_REPO:-kelexine/cubot-marlon-rom-releases}"
+readonly OTA_RELEASES_DIR="${OTA_RELEASES_DIR:-${HOME}/cubot-marlon-rom-releases}"
+readonly SF_HOST="${OTA_SF_HOST:-frs.sourceforge.net}"
+readonly SF_USER="${OTA_SF_USER:-kelexine}"
 readonly TOTAL_CORES="$(nproc 2>/dev/null || echo 4)"
 readonly REPO_SYNC_JOBS="${REPO_SYNC_JOBS:-$(( TOTAL_CORES > 24 ? 24 : TOTAL_CORES ))}"
 
@@ -64,6 +68,7 @@ declare -A LOCAL_MANIFEST_FILE=(
 )
 
 log()   { printf '\033[1;32m[setup]\033[0m %s\n' "$*"; }
+warn()  { printf '\033[1;33m[setup]\033[0m %s\n' "$*" >&2; }
 error() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
@@ -219,6 +224,113 @@ EOF
     fi
 }
 
+configure_git_and_gh() {
+    local gh_ok=false
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        gh_ok=true
+        gh auth setup-git >/dev/null 2>&1 || true
+    fi
+
+    local cur_name cur_email
+    cur_name="$(git config --global --get user.name 2>/dev/null || true)"
+    cur_email="$(git config --global --get user.email 2>/dev/null || true)"
+
+    if [[ ( -z "${cur_name}" || -z "${cur_email}" ) && "${gh_ok}" == "true" ]]; then
+        local gh_user gh_emails resolved_name resolved_email
+        gh_user="$(gh api user 2>/dev/null || true)"
+        gh_emails="$(gh api user/emails 2>/dev/null || true)"
+        if [[ -n "${gh_user}" ]]; then
+            {
+                IFS= read -r resolved_name
+                IFS= read -r resolved_email
+            } < <(python3 - "${gh_user}" "${gh_emails}" <<'PY'
+import json, sys
+u = json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
+emails = json.loads(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].strip().startswith("[") else []
+name = (u.get("name") or u.get("login") or "").strip()
+email = (u.get("email") or "").strip()
+if not email:
+    for item in emails:
+        if item.get("primary") and item.get("verified"):
+            email = (item.get("email") or "").strip()
+            break
+if not email and u.get("id") and u.get("login"):
+    email = f"{u['id']}+{u['login']}@users.noreply.github.com"
+print(name)
+print(email)
+PY
+)
+            if [[ -z "${cur_name}" && -n "${resolved_name}" ]]; then
+                git config --global user.name "${resolved_name}"
+                log "Configured global git user.name: ${resolved_name}"
+            fi
+            if [[ -z "${cur_email}" && -n "${resolved_email}" ]]; then
+                git config --global user.email "${resolved_email}"
+                log "Configured global git user.email: ${resolved_email}"
+            fi
+        fi
+    fi
+
+    cur_name="$(git config --global --get user.name 2>/dev/null || true)"
+    cur_email="$(git config --global --get user.email 2>/dev/null || true)"
+    if [[ -z "${cur_name}" || -z "${cur_email}" ]]; then
+        warn "Git user.name/user.email still unset; run 'git config --global user.name/email' or 'gh auth login'."
+    fi
+}
+
+sync_ota_releases_repo() {
+    mkdir -p "${HOME}/ota-baselines"
+    if [[ -d "${OTA_RELEASES_DIR}/.git" ]]; then
+        if [[ -z "$(git -C "${OTA_RELEASES_DIR}" status --porcelain 2>/dev/null)" ]]; then
+            log "Updating OTA release hub repo at ${OTA_RELEASES_DIR}..."
+            git -C "${OTA_RELEASES_DIR}" fetch origin main >/dev/null 2>&1 && \
+            git -C "${OTA_RELEASES_DIR}" pull --ff-only origin main >/dev/null 2>&1 || \
+                warn "Could not fast-forward ${OTA_RELEASES_DIR}; continuing."
+        else
+            warn "OTA release hub repo at ${OTA_RELEASES_DIR} has uncommitted changes; skipping pull."
+        fi
+        return 0
+    fi
+
+    log "Cloning ${OTA_RELEASES_REPO} -> ${OTA_RELEASES_DIR}..."
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        gh repo clone "${OTA_RELEASES_REPO}" "${OTA_RELEASES_DIR}" || \
+            warn "Failed to clone ${OTA_RELEASES_REPO} (push-release.sh will retry on publish)."
+    else
+        git clone "https://github.com/${OTA_RELEASES_REPO}.git" "${OTA_RELEASES_DIR}" || \
+            warn "Failed to clone ${OTA_RELEASES_REPO} (push-release.sh will retry on publish)."
+    fi
+}
+
+check_release_readiness() {
+    log "Checking release automation readiness..."
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        log "  [ready] GitHub CLI authenticated"
+    else
+        warn "  [missing] GitHub CLI not authenticated ('gh auth login' needed for -r / push-release.sh)"
+    fi
+
+    if command -v rsync >/dev/null 2>&1 && command -v sftp >/dev/null 2>&1; then
+        local -a sftp_opts=(-b /dev/null -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=no)
+        [[ -f "${HOME}/.ssh/sf_key" ]] && sftp_opts+=(-i "${HOME}/.ssh/sf_key")
+        if sftp "${sftp_opts[@]}" "${SF_USER}@${SF_HOST}:/home/frs/project/cubot-marlon-rom-releases/" >/dev/null 2>&1; then
+            log "  [ready] SourceForge FRS SSH (${SF_USER}@${SF_HOST})"
+        else
+            warn "  [note] SourceForge FRS SSH not active in this shell (connect with 'ssh -A' before ./build.sh -r or ./push-release.sh)"
+        fi
+    else
+        warn "  [missing] rsync/sftp required for SourceForge baseline upload"
+    fi
+
+    if [[ "${ROM}" != "twrp" ]]; then
+        if [[ -f "${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8" ]]; then
+            log "  [ready] Android release signing keys staged"
+        else
+            warn "  [missing] ${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8 (stage keys in ~/android-certs before signed builds/OTAs)"
+        fi
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: ${SCRIPT_NAME} <rom> [branch] [workspace_dir]
@@ -304,6 +416,7 @@ require_command git
 require_command repo
 require_command curl
 require_command unzip
+require_command python3
 
 log "ROM:              ${ROM}"
 log "Branch:           ${BRANCH}"
@@ -314,6 +427,7 @@ log "Workspace:        ${WORKSPACE_DIR}"
 mkdir -p "${WORKSPACE_DIR}"
 cd "${WORKSPACE_DIR}"
 setup_logging
+configure_git_and_gh
 
 if [[ -d .repo ]]; then
     log ".repo already exists in ${WORKSPACE_DIR}; re-running repo init to update manifest settings."
@@ -378,10 +492,16 @@ fi
 install_workspace_script "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh" "build script"
 install_workspace_script "${LOCAL_MANIFESTS_CACHE}/push-release.sh" "${WORKSPACE_DIR}/push-release.sh" "release script"
 
+sync_ota_releases_repo
+check_release_readiness
+
 log "Done. Workspace ready at: ${WORKSPACE_DIR}"
 log "Setup log saved to: ${WORKSPACE_DIR}/setup.log"
 if [[ "${ROM}" == "twrp" ]]; then
-    log "Next: cd ${WORKSPACE_DIR} && ./build.sh [eng|userdebug|user]"
+    log "Next: cd ${WORKSPACE_DIR} && ./build.sh [eng|userdebug|user] [-r|--release]"
 else
-    log "Next: cd ${WORKSPACE_DIR} && ./build.sh [userdebug|user|eng]"
+    log "Next:"
+    log "  Build only:    cd ${WORKSPACE_DIR} && ./build.sh"
+    log "  Build+Release: cd ${WORKSPACE_DIR} && ./build.sh -r"
+    log "  Publish later: cd ${WORKSPACE_DIR} && ./push-release.sh"
 fi

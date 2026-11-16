@@ -97,14 +97,15 @@ The kernel compiles with LLVM/Clang from Android NDK r30. `setup.sh` automatical
 
 ## Publishing Releases: `push-release.sh`
 
-An automated, idempotent GitHub release script is included to publish ROM builds and standalone partition images:
+An automated, idempotent GitHub release script is included to publish ROM builds, upload baselines, and push Updater manifests in one command (or automatically via `./build.sh -r`):
 
 ```bash
 ./push-release.sh [options] [out/target/product/marlon]
 ```
 
-- **Idempotent:** Re-running against an existing tag updates release notes and clobbers/updates assets without duplicating or failing.
-- **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), optional incremental OTA zip (`*-INCREMENTAL-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), target-files baseline (`~/ota-baselines/marlon-target_files-<DATE>.zip`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
+- **Zero-Flag Automation:** Running `./push-release.sh` automatically publishes GitHub Release assets (`kelexine/cubot-marlon-rom-releases`), uploads the `target-files` baseline + `.sha256` to SourceForge FRS (`ota-baselines`), detects `GMS` vs `VANILLA`, updates `~/cubot-marlon-rom-releases/OTA/{variant}/{rom}.json`, commits (`-s`), and pushes to `main`.
+- **Idempotent:** Re-running against an existing tag updates release notes and clobbers/updates assets cleanly without duplicating or failing (so if a SourceForge upload fails without `ssh -A`, simply reconnect with `ssh -A` and re-run `./push-release.sh`).
+- **Smart Discovery:** Automatically detects ROM zip (`axion-*.zip`, `lineage-*.zip`), optional incremental OTA zip (`*-INCREMENTAL-*.zip`), companion partition images (`boot.img`, `dtbo.img`, `recovery.img`, `vbmeta.img`, `super_empty.img`), UTC-matched target-files baseline (`~/ota-baselines/marlon-target_files-*.zip`), and generates/verifies SHA-256 checksums (`SHA256SUMS.txt`).
 - **Options:**
   - `-d, --dir <path>`: Target product directory.
   - `-r, --repo <owner/repo>`: GitHub repository (defaults to `kelexine/cubot-marlon-rom-releases`).
@@ -117,14 +118,27 @@ An automated, idempotent GitHub release script is included to publish ROM builds
   - `-i, --incremental <file>`: Incremental OTA zip to attach alongside the full ROM zip.
   - `-b, --target-files <file>`: Target-files baseline zip to track in generated OTA JSON (`axion.json` / `lineage.json`).
   - `--baseline-url <url>` / `--baseline-base-url <url>`: Target-files download URL (defaults to `cubot-marlon-rom-releases` SourceForge `ota-baselines`) written to OTA JSON.
-  - `--sf-dest <rsync-dest>`: Optional SourceForge FRS rsync upload target for `target-files.zip`.
+  - `--sf-dest <rsync-dest>` / `--no-sf`: SourceForge FRS rsync upload target (defaults to `kelexine@frs.sourceforge.net:/home/frs/project/cubot-marlon-rom-releases/ota-baselines`; use `--no-sf` to skip).
   - `--split-baseline`: Split `>1900 MiB` `target-files.zip` into `<=1800 MiB` GitHub Release parts.
-  - `--ota-json-out <file>` / `--ota-json-push <git-dir>`: Generate and optionally commit/push Updater manifest (`axion.json` / `lineage.json`).
+  - `--ota-json-out <file>` / `--ota-json-push <git-dir>` / `--no-ota-push`: Override or disable automatic commit & push to `~/cubot-marlon-rom-releases`.
   - `--prerelease` / `--draft`: Mark the release as pre-release or draft.
   - `--dry-run`: Preview assets, release notes, and generated OTA JSON without uploading.
 
-### Incremental OTA & Baseline Workflow (`build-axion.sh`)
-Pass `--incremental` (with optional `--ota-json <url|file>`, `--sf-dest`, and `--release`) to `./build.sh` so a build automatically archives its `target-files.zip`, resolves `cubot-marlon-rom-releases/OTA/{variant}/axion.json`, fetches and SHA-256-verifies the prior baseline on a fresh server, signs an incremental OTA via `ota_from_target_files -i`, and publishes everything together.
+### Zero-Flag Build & Release Workflow (`setup.sh` -> `build.sh` -> `push-release.sh`)
+```bash
+# 1. Fresh server setup (syncs tree, NDK, certs, git/gh auth, clones cubot-marlon-rom-releases)
+./setup.sh axion
+
+# 2. Build ROM + archive baseline + resolve prior baseline via OTA JSON + generate incremental OTA
+cd axion && ./build.sh
+
+#    Or build + automatically publish GitHub Release + SourceForge baseline + OTA JSON in one shot:
+./build.sh -r
+
+# 3. Or publish separately after building (pass ssh -A on remote servers for SourceForge FRS):
+./push-release.sh
+```
+Pass `--no-incremental`, `--no-sf`, or `--no-ota-push` to opt out of any automated stage.
 
 ## Contributing
 - Follow Conventional Commits: `<type>(<scope>): <summary>`
