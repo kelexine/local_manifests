@@ -339,12 +339,10 @@ check_release_readiness() {
         warn "  [missing] rsync/sftp required for SourceForge baseline upload"
     fi
 
-    if [[ "${ROM}" != "twrp" ]]; then
-        if [[ -f "${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8" ]]; then
-            log "  [ready] Android release signing keys staged"
-        else
-            warn "  [missing] ${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8 (stage keys in ~/android-certs before signed builds/OTAs)"
-        fi
+    if [[ -f "${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8" ]]; then
+        log "  [ready] Android release signing keys staged"
+    else
+        warn "  [missing] ${WORKSPACE_DIR}/vendor/lineage-priv/keys/releasekey.pk8 (stage keys in ~/android-certs before signed builds/OTAs)"
     fi
 }
 
@@ -446,22 +444,38 @@ cd "${WORKSPACE_DIR}"
 setup_logging
 configure_git_and_gh
 
-if [[ -d .repo ]]; then
-    log ".repo already exists in ${WORKSPACE_DIR}; re-running repo init to update manifest settings."
-else
-    log "Initializing new repo workspace."
-fi
-
-repo init -u "${UPSTREAM_URL}" -b "${UPSTREAM_BRANCH}" --git-lfs
-
 readonly LOCAL_MANIFESTS_DIR=".repo/local_manifests"
 readonly LOCAL_MANIFESTS_CACHE=".repo/.local_manifests_repo"
+readonly OFOX_SYNC_CACHE=".repo/.orangefox_sync"
 
 # Migrate legacy setups where .repo/local_manifests was itself the git clone
 if [[ -d "${LOCAL_MANIFESTS_DIR}/.git" ]]; then
     log "Migrating legacy .repo/local_manifests git clone to cache directory."
     rm -rf "${LOCAL_MANIFESTS_CACHE}"
     mv -f "${LOCAL_MANIFESTS_DIR}" "${LOCAL_MANIFESTS_CACHE}"
+fi
+
+if [[ "${ROM}" == "ofrp" && "${UPSTREAM_BRANCH}" != "fox_16.0" ]]; then
+    ofox_branch="${UPSTREAM_BRANCH#fox_}"
+    if [[ -d "${OFOX_SYNC_CACHE}/.git" ]]; then
+        log "Updating OrangeFox sync engine in ${OFOX_SYNC_CACHE}..."
+        git -C "${OFOX_SYNC_CACHE}" fetch origin master >/dev/null 2>&1 || true
+        git -C "${OFOX_SYNC_CACHE}" reset --hard origin/master >/dev/null 2>&1 || true
+    else
+        rm -rf "${OFOX_SYNC_CACHE}"
+        log "Cloning OrangeFox sync engine (https://gitlab.com/OrangeFox/sync.git)..."
+        git clone --depth=1 https://gitlab.com/OrangeFox/sync.git "${OFOX_SYNC_CACHE}"
+    fi
+    log "Running OrangeFox sync engine (--branch ${ofox_branch})..."
+    (cd "${OFOX_SYNC_CACHE}" && yes n | ./orangefox_sync.sh --branch "${ofox_branch}" --path "${WORKSPACE_DIR}")
+else
+    if [[ -d .repo ]]; then
+        log ".repo already exists in ${WORKSPACE_DIR}; re-running repo init to update manifest settings."
+    else
+        log "Initializing new repo workspace."
+    fi
+
+    repo init -u "${UPSTREAM_URL}" -b "${UPSTREAM_BRANCH}" --git-lfs
 fi
 
 if [[ -d "${LOCAL_MANIFESTS_CACHE}/.git" ]]; then
@@ -487,8 +501,21 @@ find "${LOCAL_MANIFESTS_DIR}" -maxdepth 1 -name '*.xml' -exec rm -f {} +
 log "Installing manifest: ${LOCAL_MANIFEST_XML} -> ${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
 cp -f "${LOCAL_MANIFESTS_CACHE}/${LOCAL_MANIFEST_XML}" "${LOCAL_MANIFESTS_DIR}/${ROM}.xml"
 
-log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
-repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
+if [[ "${ROM}" == "ofrp" && "${UPSTREAM_BRANCH}" != "fox_16.0" ]]; then
+    log "Syncing OrangeFox local manifest projects (device/kernel) without clobbering OFRP patches..."
+    mapfile -t ofrp_local_paths < <(python3 -c 'import xml.etree.ElementTree as ET, sys
+root = ET.parse(sys.argv[1]).getroot()
+for p in root.findall("project"):
+    path = p.get("path") or p.get("name")
+    if path:
+        print(path)' "${LOCAL_MANIFESTS_DIR}/${ROM}.xml")
+    if [[ ${#ofrp_local_paths[@]} -gt 0 ]]; then
+        repo sync -c --no-clone-bundle --no-tags --optimized-fetch -j"${REPO_SYNC_JOBS}" "${ofrp_local_paths[@]}"
+    fi
+else
+    log "Starting repo sync with ${REPO_SYNC_JOBS} jobs. This will take a while."
+    repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j"${REPO_SYNC_JOBS}"
+fi
 
 apply_rom_patches
 
@@ -502,9 +529,7 @@ elif [[ "${ROM}" != "twrp" ]]; then
     configure_ndk_env
 fi
 
-if [[ "${ROM}" != "twrp" ]]; then
-    configure_signing_keys
-fi
+configure_signing_keys
 
 install_workspace_script "${LOCAL_MANIFESTS_CACHE}/build-${ROM}.sh" "${WORKSPACE_DIR}/build.sh" "build script"
 install_workspace_script "${LOCAL_MANIFESTS_CACHE}/push-release.sh" "${WORKSPACE_DIR}/push-release.sh" "release script"

@@ -3,7 +3,7 @@
 # Author: kelexine <https://github.com/kelexine>
 # Date: 2026-10-21
 # Purpose: Automated TWRP 12.1 recovery build script for Cubot P50 (marlon)
-# Usage: ./build-twrp.sh [eng|userdebug|user] [-j<num>] [--inline-kernel]
+# Usage: ./build-twrp.sh [eng|userdebug|user] [-j<num>] [--prebuilt-kernel] [-r]
 
 set -eo pipefail
 
@@ -14,7 +14,11 @@ readonly DEVICE="marlon"
 
 TARGET_VARIANT="eng"
 JOB_COUNT=""
-INLINE_KERNEL=false
+INLINE_KERNEL=true
+INLINE_KERNEL_EXPLICIT=false
+AUTO_RELEASE=false
+RELEASE_TAG_OVERRIDE=""
+RELEASE_PRERELEASE=false
 
 readonly DEVICE_TREE_DIR="${WORKSPACE_ROOT}/device/cubot/${DEVICE}"
 readonly KERNEL_SRC="${WORKSPACE_ROOT}/kernel/cubot/${DEVICE}"
@@ -44,13 +48,18 @@ Build Variants:
 
 Options:
   -j<num>                         Job count (e.g. -j16, -j64)
-  --inline-kernel                 Compile kernel from kernel/cubot/marlon with NDK r30
+  --inline-kernel                 Compile kernel from kernel/cubot/marlon with NDK r30 (default)
+  --prebuilt-kernel               Force stock prebuilt kernel/dtb fallback
+  --release, -r                   Publish built recovery.img via push-release.sh
+  --tag <tag>                     Explicit GitHub release tag passed to push-release.sh
+  --prerelease                    Mark GitHub release as pre-release
   -h, --help                      Show this help message and exit
 
 Examples:
   ./build.sh
   ./build.sh eng -j64
-  ./build.sh eng --inline-kernel
+  ./build.sh eng -r
+  ./build.sh eng --prebuilt-kernel
 EOF
 }
 
@@ -70,6 +79,21 @@ parse_arguments() {
                 ;;
             --inline-kernel)
                 INLINE_KERNEL=true
+                INLINE_KERNEL_EXPLICIT=true
+                ;;
+            --prebuilt-kernel)
+                INLINE_KERNEL=false
+                ;;
+            --tag)
+                [[ -n "${2:-}" ]] || die "Option $1 requires a release tag."
+                RELEASE_TAG_OVERRIDE="$2"
+                shift
+                ;;
+            --prerelease)
+                RELEASE_PRERELEASE=true
+                ;;
+            --release|-r)
+                AUTO_RELEASE=true
                 ;;
             -h|--help)
                 show_help
@@ -107,24 +131,71 @@ format_duration() {
     fi
 }
 
+resolve_push_script() {
+    if [[ -x "${WORKSPACE_ROOT}/push-release.sh" ]]; then
+        echo "${WORKSPACE_ROOT}/push-release.sh"
+    elif [[ -x "${SCRIPT_DIR}/push-release.sh" ]]; then
+        echo "${SCRIPT_DIR}/push-release.sh"
+    elif [[ -x "${WORKSPACE_ROOT}/.repo/.local_manifests_repo/push-release.sh" ]]; then
+        echo "${WORKSPACE_ROOT}/.repo/.local_manifests_repo/push-release.sh"
+    elif command -v push-release.sh >/dev/null 2>&1; then
+        command -v push-release.sh
+    fi
+}
+
 verify_prerequisites() {
     log "Verifying TWRP build prerequisites..."
     [[ -f "${WORKSPACE_ROOT}/build/envsetup.sh" ]] || die "Workspace root is not an Android/TWRP tree (${WORKSPACE_ROOT})."
     [[ -d "${DEVICE_TREE_DIR}" ]] || die "TWRP device tree missing at ${DEVICE_TREE_DIR}."
     if [[ "${INLINE_KERNEL}" == "true" ]]; then
-        [[ -d "${KERNEL_SRC}" ]] || die "--inline-kernel requested, but kernel source missing at ${KERNEL_SRC}."
-        [[ -d "${NDK_BIN}" ]] || die "--inline-kernel requested, but NDK r30 toolchain not found at ${NDK_BIN}."
+        if [[ ! -d "${KERNEL_SRC}" ]]; then
+            if [[ "${INLINE_KERNEL_EXPLICIT}" == "true" ]]; then
+                die "--inline-kernel requested, but kernel source missing at ${KERNEL_SRC}."
+            fi
+            warn "Kernel source missing at ${KERNEL_SRC}; falling back to stock prebuilt kernel."
+            INLINE_KERNEL=false
+        elif [[ ! -d "${NDK_BIN}" ]]; then
+            die "NDK r30 toolchain not found at ${NDK_BIN}. Please run setup.sh first."
+        fi
+    fi
+}
+
+setup_signing_keys() {
+    local keys_dir="${WORKSPACE_ROOT}/vendor/lineage-priv/keys"
+    local external_certs="${HOME}/android-certs"
+
+    if [[ -f "${external_certs}/releasekey.pk8" && ! -f "${keys_dir}/releasekey.pk8" ]]; then
+        log "Staging ROM signing keys from ${external_certs} -> ${keys_dir}..."
+        mkdir -p "${keys_dir}"
+        cp -af "${external_certs}"/*.pk8 "${external_certs}"/*.pem "${keys_dir}/"
+        chmod 600 "${keys_dir}"/*.pk8 2>/dev/null || true
+    fi
+
+    if [[ -f "${keys_dir}/releasekey.pk8" ]]; then
+        if [[ ! -f "${keys_dir}/keys.mk" ]]; then
+            cat <<'EOF' > "${keys_dir}/keys.mk"
+PRODUCT_DEFAULT_DEV_CERTIFICATE := vendor/lineage-priv/keys/releasekey
+PRODUCT_MAINLINE_SEPOLICY_DEV_CERTIFICATES := $(dir $(PRODUCT_DEFAULT_DEV_CERTIFICATE))
+PRODUCT_MAINLINE_BLUETOOTH_SEPOLICY_DEV_CERTIFICATES := $(dir $(PRODUCT_DEFAULT_DEV_CERTIFICATE))
+EOF
+        fi
+        export ROM_KEYS_PATH="${keys_dir#${WORKSPACE_ROOT}/}"
+        log "Signing TWRP with release keys (${keys_dir}/releasekey)..."
+    else
+        warn "No releasekey.pk8 found in ${keys_dir} or ${external_certs}; TWRP will use default test keys."
     fi
 }
 
 setup_inline_kernel_env() {
     if [[ "${INLINE_KERNEL}" != "true" ]]; then
+        log "Using stock prebuilt kernel fallback (TARGET_FORCE_PREBUILT_KERNEL=true)..."
+        export TARGET_FORCE_PREBUILT_KERNEL="true"
         return 0
     fi
     log "Configuring Android NDK r30 LLVM environment for inline kernel compilation..."
     export PATH="${NDK_BIN}:${PATH}"
     export TARGET_KERNEL_CLANG_PATH="${NDK_BIN%/bin}"
-    export TARGET_FORCE_PREBUILT_KERNEL="false"
+    unset TARGET_FORCE_PREBUILT_KERNEL
     export CLANG_TRIPLE="aarch64-linux-gnu-"
     export CROSS_COMPILE="aarch64-linux-gnu-"
     export LLVM=1
@@ -144,6 +215,12 @@ init_twrp_environment() {
     cd "${WORKSPACE_ROOT}"
     export ANDROID_BUILD_TOP="${WORKSPACE_ROOT}"
     export ALLOW_MISSING_DEPENDENCIES=true
+
+    local cur_nofile
+    cur_nofile="$(ulimit -Sn 2>/dev/null || echo 1024)"
+    if [[ "${cur_nofile}" =~ ^[0-9]+$ ]] && (( cur_nofile < 65536 )); then
+        ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+    fi
 
     if [[ -d "${WORKSPACE_ROOT}/.repo/local_manifests" ]]; then
         find "${WORKSPACE_ROOT}/.repo/local_manifests" -maxdepth 1 -name '*.xml' ! -name 'twrp.xml' ! -name 'twrp-*.xml' -exec rm -f {} +
@@ -173,12 +250,24 @@ build_recovery_image() {
     log "[+] TWRP recovery image built successfully: ${recovery_img}"
 
     local pub_dir="/var/www/html/kelexine"
-    if [[ -d "/var/www/html" ]]; then
-        mkdir -p "${pub_dir}"
+    if [[ ( -d "${pub_dir}" && -w "${pub_dir}" ) || ( ! -d "${pub_dir}" && -w "/var/www/html" ) ]]; then
+        mkdir -p "${pub_dir}" 2>/dev/null || true
         local dated_img="${pub_dir}/twrp-12.1-${LOG_TIMESTAMP}-${DEVICE}.img"
-        cp -v "${recovery_img}" "${dated_img}" || true
-        ln -sfn "$(basename "${dated_img}")" "${pub_dir}/twrp-${DEVICE}-latest.img" 2>/dev/null || true
-        log "[+] Published TWRP recovery image: https://ferrari.serverhive.in/kelexine/$(basename "${dated_img}")"
+        if cp -v "${recovery_img}" "${dated_img}" 2>/dev/null; then
+            ln -sfn "$(basename "${dated_img}")" "${pub_dir}/twrp-${DEVICE}-latest.img" 2>/dev/null || true
+            log "[+] Published TWRP recovery image: https://ferrari.serverhive.in/kelexine/$(basename "${dated_img}")"
+        fi
+    fi
+
+    if [[ "${AUTO_RELEASE}" == "true" ]]; then
+        local push_script
+        push_script="$(resolve_push_script)"
+        [[ -n "${push_script}" ]] || die "Automatic release requested (-r/--release), but push-release.sh not found."
+        local tag="${RELEASE_TAG_OVERRIDE:-twrp-12.1-$(date +%Y%m%d)}"
+        local -a release_args=("--tag" "${tag}" "--title" "TWRP 12.1 Recovery for Cubot P50 (${DEVICE}) - ${tag}" "--no-ota-push")
+        [[ "${RELEASE_PRERELEASE}" == "true" ]] && release_args+=("--prerelease")
+        log "Triggering automatic release push via ${push_script}..."
+        "${push_script}" "${release_args[@]}" "${OUT}" || die "Release upload failed."
     fi
 }
 
@@ -192,11 +281,13 @@ main() {
     log "  TWRP 12.1 Build Automation for Cubot P50 (marlon)"
     log "  Variant:       ${TARGET_VARIANT}"
     log "  Inline Kernel: ${INLINE_KERNEL}"
+    log "  Auto Release:  ${AUTO_RELEASE}"
     [[ -n "${JOB_COUNT}" ]] && log "  Job Count:     ${JOB_COUNT}"
     log "  Log File:      ${LOG_FILE}"
     log "=================================================="
 
     verify_prerequisites
+    setup_signing_keys
     setup_inline_kernel_env
     init_twrp_environment
     build_recovery_image

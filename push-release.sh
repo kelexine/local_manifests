@@ -325,7 +325,7 @@ collect_assets() {
     local zip_candidates=()
     while IFS= read -r z; do
         [[ -n "${z}" ]] && zip_candidates+=("${z}")
-    done < <(find . -maxdepth 1 -type f \( -name "axion-*.zip" -o -name "lineage-*.zip" -o -name "ofrp-*.zip" -o -name "twrp-*.zip" \) ! -name "*-ota.zip" ! -name "*-INCREMENTAL-*.zip" -printf "%f\n" | sort -r)
+    done < <(find . -maxdepth 1 -type f \( -name "axion-*.zip" -o -name "lineage-*.zip" -o -name "OrangeFox-*.zip" -o -name "ofrp-*.zip" -o -name "twrp-*.zip" \) ! -name "*-ota.zip" ! -name "*-INCREMENTAL-*.zip" -printf "%f\n" | sort -r)
 
     ROM_TYPE_TAG="UNOFFICIAL"
     if [[ ${#zip_candidates[@]} -gt 0 ]]; then
@@ -599,8 +599,12 @@ resolve_release_info() {
     log "Release Tag:       ${RELEASE_TAG}"
     log "Release Title:     ${RELEASE_TITLE}"
     log "Pre-release:       ${IS_PRERELEASE}"
-    [[ "${PRIMARY_ON_SF}" == "true" ]] && log "Primary ROM (>2G): Offloading to SourceForge (${PRIMARY_SF_URL})"
-    [[ -n "${TARGET_FILES_ZIP}" ]] && log "Target-Files ZIP:  ${TARGET_FILES_ZIP}"
+    if [[ "${PRIMARY_ON_SF}" == "true" ]]; then
+        log "Primary ROM (>2G): Offloading to SourceForge (${PRIMARY_SF_URL})"
+    fi
+    if [[ -n "${TARGET_FILES_ZIP}" ]]; then
+        log "Target-Files ZIP:  ${TARGET_FILES_ZIP}"
+    fi
 }
 
 # Generate rich markdown release notes
@@ -621,7 +625,52 @@ generate_release_notes() {
         fs_display="N/A"
     fi
 
-    cat <<EOF > "${NOTES_TMP}"
+    if [[ "${RELEASE_TAG}" == twrp-* || "${RELEASE_TAG}" == ofrp-* || "${PRIMARY_ZIP}" == OrangeFox-*.zip ]]; then
+        cat <<EOF > "${NOTES_TMP}"
+### ${RELEASE_TITLE}
+
+**Device:** Cubot P50 (\`marlon\`)
+**Platform:** MediaTek MT6765 / MT6762 (Helio P35)
+**Release Tag:** \`${RELEASE_TAG}\`
+**Variant:** \`eng\`
+**Signing:** ROM \`releasekey\` (\`otacerts.zip\` / zip signature)
+**Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
+
+---
+
+### Highlights & Changes
+
+- **Kernel Compiled from Source:** Built inline from \`kernel/cubot/marlon\` (\`marlon-cip\`, Linux \`4.19.325-cip136\`) with **Android NDK r30** and in-tree MTK \`dtb.img\` (\`mkdtimg\`).
+- **Dynamic Partitions & EROFS Support:** Supports both **EROFS** and **ext4** for \`system\`, \`vendor\`, and \`product\`, plus FBE v2 decryption.
+- **ROM Release Key Alignment:** Signed and configured with the ROM \`releasekey\` so OTA and flashable ROM packages pass signature verification cleanly.
+EOF
+        if [[ -n "${EXTRA_NOTES_FILE}" ]]; then
+            [[ -f "${EXTRA_NOTES_FILE}" ]] || die "Extra notes file not found: ${EXTRA_NOTES_FILE}"
+            printf '\n---\n\n' >> "${NOTES_TMP}"
+            cat "${EXTRA_NOTES_FILE}" >> "${NOTES_TMP}"
+            printf '\n' >> "${NOTES_TMP}"
+        fi
+        cat <<EOF >> "${NOTES_TMP}"
+
+---
+
+### Flashing Instructions
+
+#### Fastboot
+\`\`\`bash
+fastboot flash recovery recovery.img
+fastboot reboot recovery
+\`\`\`
+EOF
+        if [[ -n "${PRIMARY_ZIP}" ]]; then
+            cat <<EOF >> "${NOTES_TMP}"
+
+#### Existing Custom Recovery (Zip)
+- Flash \`${PRIMARY_ZIP}\` directly in TWRP or OrangeFox Recovery.
+EOF
+        fi
+    else
+        cat <<EOF > "${NOTES_TMP}"
 ### ${RELEASE_TITLE}
 
 **Device:** Cubot P50 (\`marlon\`)
@@ -732,6 +781,7 @@ adb sideload ${INCREMENTAL_ZIP}
 \`\`\`
 *(Or select **Local update** in Settings -> System -> Updater. Only applies cleanly on top of the exact matching prior baseline build without \`/system\`, \`/vendor\`, or \`/product\` modifications.)*
 EOF
+    fi
     fi
 
     cat <<EOF >> "${NOTES_TMP}"
