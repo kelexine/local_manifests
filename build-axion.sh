@@ -622,17 +622,18 @@ generate_incremental_ota() {
         return 0
     fi
 
-    local prev_date curr_date
+    local prev_date curr_date curr_stamp
     prev_date="$(date -u -d "@${prev_utc:-0}" +%Y%m%d 2>/dev/null || basename "${PREV_TARGET_FILES_ZIP}" | grep -oE '[0-9]{8}' | head -n1 || echo "prev")"
     curr_date="$(date -u -d "@${curr_utc:-0}" +%Y%m%d 2>/dev/null || date +%Y%m%d)"
+    curr_stamp="${curr_utc:-$(date -u +%s)}"
 
     local primary_zip
     primary_zip="$(find "${out_target}" -maxdepth 1 -type f -name 'axion-*.zip' ! -name '*-ota.zip' ! -name '*-INCREMENTAL-*.zip' -printf '%f\n' | sort -r | head -n 1 || true)"
     local incr_name
     if [[ "${primary_zip}" =~ ^(axion-[0-9.]+-[A-Za-z0-9_]+)-[0-9]{8}-(.*)\.zip$ ]]; then
-        incr_name="${BASH_REMATCH[1]}-${prev_date}-to-${curr_date}-INCREMENTAL-${BASH_REMATCH[2]}.zip"
+        incr_name="${BASH_REMATCH[1]}-${prev_date}-to-${curr_date}-${curr_stamp}-INCREMENTAL-${BASH_REMATCH[2]}.zip"
     else
-        incr_name="axion-${DEVICE}-${prev_date}-to-${curr_date}-INCREMENTAL.zip"
+        incr_name="axion-${DEVICE}-${prev_date}-to-${curr_date}-${curr_stamp}-INCREMENTAL.zip"
     fi
 
     local incr_path="${out_target}/${incr_name}"
@@ -704,6 +705,7 @@ build_rom_package() {
         if [[ -n "${push_script}" ]]; then
             local -a release_args=()
             [[ -n "${INCREMENTAL_ZIP_PATH}" ]] && release_args+=("--incremental" "${INCREMENTAL_ZIP_PATH}")
+            [[ -n "${PREV_TARGET_FILES_ZIP}" ]] && release_args+=("--base-target-files" "${PREV_TARGET_FILES_ZIP}")
             [[ -n "${CURRENT_TARGET_FILES_ZIP}" ]] && release_args+=("--target-files" "${CURRENT_TARGET_FILES_ZIP}")
             [[ -n "${BASELINE_URL}" ]] && release_args+=("--baseline-url" "${BASELINE_URL}")
             [[ -n "${BASELINE_BASE_URL}" ]] && release_args+=("--baseline-base-url" "${BASELINE_BASE_URL}")

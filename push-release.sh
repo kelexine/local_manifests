@@ -37,6 +37,7 @@ INCREMENTAL_ZIP_ARG=""
 INCREMENTAL_ZIP=""
 TARGET_FILES_ARG=""
 TARGET_FILES_ZIP=""
+BASE_TARGET_FILES_ARG="${PREV_TARGET_FILES_ZIP:-}"
 BASELINE_URL="${OTA_BASELINE_URL:-}"
 BASELINE_BASE_URL="${OTA_BASELINE_BASE_URL:-https://sourceforge.net/projects/cubot-marlon-rom-releases/files/ota-baselines}"
 readonly GH_MAX_ASSET_BYTES=2097152000
@@ -81,6 +82,7 @@ Options:
       --fs <auto|erofs|ext4>   Override super partition filesystem detection (default: auto).
   -i, --incremental <file>     Incremental OTA zip (auto-discovered in product dir if omitted).
   -b, --target-files <file>    Target-files baseline zip (auto-checks ~/ota-baselines/).
+      --base-target-files <f>  Base target-files zip used to generate the incremental OTA.
       --baseline-url <url>     Explicit download URL for target_files in generated OTA JSON.
       --baseline-base-url <u>  Base URL directory used to construct target_files.url (SourceForge-aware).
       --sf-dest <rsync-dest>   SourceForge FRS rsync target (default: kelexine@frs.sourceforge.net:.../ota-baselines).
@@ -159,6 +161,11 @@ parse_args() {
             -b|--target-files)
                 [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
                 TARGET_FILES_ARG="$2"
+                shift 2
+                ;;
+            --base-target-files)
+                [[ -n "${2:-}" ]] || die "Option $1 requires an argument."
+                BASE_TARGET_FILES_ARG="$2"
                 shift 2
                 ;;
             --baseline-url)
@@ -369,7 +376,7 @@ collect_assets() {
         INCREMENTAL_ZIP="${incr_base}"
     else
         local incr_candidate=""
-        incr_candidate="$(find . -maxdepth 1 -type f \( -name "axion-*-INCREMENTAL-*.zip" -o -name "lineage-*-INCREMENTAL-*.zip" \) -printf "%f\n" | sort -r | head -n 1 || true)"
+        incr_candidate="$(find . -maxdepth 1 -type f \( -name "axion-*-INCREMENTAL-*.zip" -o -name "lineage-*-INCREMENTAL-*.zip" \) -printf "%T@ %f\n" | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
         [[ -n "${incr_candidate}" ]] && INCREMENTAL_ZIP="${incr_candidate}"
     fi
     if [[ -n "${INCREMENTAL_ZIP}" ]]; then
@@ -607,7 +614,7 @@ resolve_release_info() {
     fi
 }
 
-# Generate rich markdown release notes
+# Generate concise markdown release notes
 generate_release_notes() {
     NOTES_TMP="$(mktemp /tmp/release_notes_XXXXXX.md)"
     trap 'rm -f "${NOTES_TMP:-}"' EXIT
@@ -620,7 +627,7 @@ generate_release_notes() {
 
     local fs_display="ext4"
     if [[ "${DETECTED_FS}" == "erofs" ]]; then
-        fs_display="EROFS (\`lz4hc,9\`, 256KiB pcluster) + \`ext4\` fallback"
+        fs_display="EROFS (\`lz4hc,9\`)"
     elif [[ "${DETECTED_FS}" == "unknown" ]]; then
         fs_display="N/A"
     fi
@@ -629,20 +636,9 @@ generate_release_notes() {
         cat <<EOF > "${NOTES_TMP}"
 ### ${RELEASE_TITLE}
 
-**Device:** Cubot P50 (\`marlon\`)
-**Platform:** MediaTek MT6765 / MT6762 (Helio P35)
-**Release Tag:** \`${RELEASE_TAG}\`
-**Variant:** \`eng\`
-**Signing:** ROM \`releasekey\` (\`otacerts.zip\` / zip signature)
-**Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
-
----
-
-### Highlights & Changes
-
-- **Kernel Compiled from Source:** Built inline from \`kernel/cubot/marlon\` (\`marlon-cip\`, Linux \`4.19.325-cip136\`) with **Android NDK r30** and in-tree MTK \`dtb.img\` (\`mkdtimg\`).
-- **Dynamic Partitions & EROFS Support:** Supports both **EROFS** and **ext4** for \`system\`, \`vendor\`, and \`product\`, plus FBE v2 decryption.
-- **ROM Release Key Alignment:** Signed and configured with the ROM \`releasekey\` so OTA and flashable ROM packages pass signature verification cleanly.
+- **Device:** Cubot P50 (\`marlon\`)
+- **Tag:** \`${RELEASE_TAG}\`
+- **Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
 EOF
         if [[ -n "${EXTRA_NOTES_FILE}" ]]; then
             [[ -f "${EXTRA_NOTES_FILE}" ]] || die "Extra notes file not found: ${EXTRA_NOTES_FILE}"
@@ -652,11 +648,7 @@ EOF
         fi
         cat <<EOF >> "${NOTES_TMP}"
 
----
-
-### Flashing Instructions
-
-#### Fastboot
+### Flashing
 \`\`\`bash
 fastboot flash recovery recovery.img
 fastboot reboot recovery
@@ -664,133 +656,48 @@ fastboot reboot recovery
 EOF
         if [[ -n "${PRIMARY_ZIP}" ]]; then
             cat <<EOF >> "${NOTES_TMP}"
-
-#### Existing Custom Recovery (Zip)
-- Flash \`${PRIMARY_ZIP}\` directly in TWRP or OrangeFox Recovery.
+*Or flash \`${PRIMARY_ZIP}\` in existing custom recovery.*
 EOF
         fi
     else
         cat <<EOF > "${NOTES_TMP}"
 ### ${RELEASE_TITLE}
 
-**Device:** Cubot P50 (\`marlon\`)
-**Platform:** MediaTek MT6765 / MT6762 (Helio P35)
-**Release Tag:** \`${RELEASE_TAG}\`
-**Filesystem:** ${fs_display}
-**Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
-
----
-
-### Highlights & Key Improvements
-
-- **Kernel Linux 4.19.325 (CIP SLTS) Overhaul:**
-  - **Syscall 436 (\`close_range\`):** Full upstream backport including \`CLOSE_RANGE_CLOEXEC\`, \`CLOSE_RANGE_UNSHARE\`, and syzbot race fixes. Resolves bionic \`posix_spawn\` failure (\`close_range(3, ~0U, CLOSE_RANGE_CLOEXEC)\`) and restores functional Wi-Fi Hotspot / Tethering (\`dnsmasq\`).
-  - **Syscall 435 (\`clone3\`):** Modern fork syscall with \`copy_struct_from_user\` framework and \`CLONE_CLEAR_SIGHAND\` support.
-  - **Syscall 438 (\`pidfd_getfd\`):** Process file-descriptor duplicate and transfer mechanism.
-  - **Syscall 439 (\`faccessat2\`):** Modern access validation integrated with MTK \`inode_permission2\` VFS security framework.
-  - **Syscall 440 (\`process_madvise\`):** External memory hinting API for modern Android memory daemons with arm64 32-bit compat plumbing.
-  - **Syscall 441 (\`epoll_pwait2\`):** High-precision nanosecond epoll wait with 64-bit and compat 32-bit plumbing.
-  - **Memory Management & ART CMC GC Support:**
-    - **Syscall \`mremap(MREMAP_DONTUNMAP)\`:** Upstream backport for anonymous and shared memory (memfd/shmem), allowing Java heap physical pages to be remapped without unmapping the virtual address space.
-    - **Userfaultfd Minor Faults (\`UFFDIO_CONTINUE\`):** Backported minor-fault registration (\`UFFDIO_REGISTER_MODE_MINOR\`) and continuation ioctl (\`UFFDIO_CONTINUE\`) for hugetlbfs and shmem, satisfying the kernel prerequisites for Android Runtime (ART) Concurrent Mark-Compact (CMC) Garbage Collection.
-    - \`CONFIG_USERFAULTFD=y\`, \`CONFIG_MEMCG=y\`, \`CONFIG_MEMCG_SWAP=y\`, and \`CONFIG_PSI=y\` enabled for modern Android 15/16 memory isolation and \`lmkd\` pressure tracking.
-
-- **Performance Profile HAL (\`Encore\`):**
-  - Integrated frozen \`vendor.cubot.hardware.encore\` AIDL v1 service with VINTF manifest fragment and compatibility matrix.
-  - Wired MT6765/MT6762 CPU/GPU OPP table telemetry, GED inverse level control, and FPSGO scheduling toggles with dedicated \`encore.te\` SELinux policy.
-
-- **Gestures & Input (\`DT2W\` / \`KeyHandler\`):**
-  - Added \`MarlonKeyHandler\` with \`overlay-lineage\` RRO config (\`config_device_supports_double_tap\`), \`mtk-tpd.kl\` wake key mapping, and \`DoubleTapToWakeController\` sync against \`Settings.Secure.DOUBLE_TAP_TO_WAKE\`.
-  - Enabled lockscreen-safe wake, torch (\`TorchCallback\`), and camera keyguard launch actions via \`ActionUtils\`.
-
-- **Audio & Dolby Atmos Subsystem:**
-  - Resolved direct-branch linker undefined symbol in \`libshim_audio.so\` for \`audioPortConfigsToHal\`.
-  - In-process Bluetooth Audio HAL provider with dynamic routing fallback.
-  - **Dolby Atmos Audio System:** Patched 64-bit DAP audio effect (\`libswdap.so\`), \`libdlbdsservice.so\`, and \`libdlbpreg.so\` dynamic linker dependencies to link against \`libstagefright_foundation-v33.so\`.
-  - Declared \`vendor.dolby.hardware.dms@2.0::IDms default\` in service init script and granted SELinux binder permissions for \`system_app\` (\`LunarisDolby\`) to communicate with \`hal_dms\`.
-
-- **Storage & File System Stability:**
-  - Enabled \`CONFIG_FUSE_FS=y\` and \`CONFIG_CUSE=y\` in \`marlon_defconfig\` for rock-solid userspace storage virtualization.
-  - Aligned Android 16 storage parameters to eliminate dangling symlinks to \`/dev/null\` for internal storage (\`/sdcard\`).
+- **Device:** Cubot P50 (\`marlon\`)
+- **Tag:** \`${RELEASE_TAG}\`
+- **Filesystem:** ${fs_display}
+- **Build Date:** $(date -u +'%Y-%m-%d %H:%M UTC')
 EOF
 
-    if [[ "${DETECTED_FS}" == "erofs" ]]; then
-        cat <<'EOF' >> "${NOTES_TMP}"
+        if [[ -n "${EXTRA_NOTES_FILE}" ]]; then
+            [[ -f "${EXTRA_NOTES_FILE}" ]] || die "Extra notes file not found: ${EXTRA_NOTES_FILE}"
+            printf '\n---\n\n' >> "${NOTES_TMP}"
+            cat "${EXTRA_NOTES_FILE}" >> "${NOTES_TMP}"
+            printf '\n' >> "${NOTES_TMP}"
+        fi
 
-- **EROFS Dynamic Partitions (Default):**
-  - Read-only dynamic super partitions (`system`, `vendor`, `product`) use **EROFS** (`lz4hc,9`, `BOARD_EROFS_PCLUSTER_SIZE := 262144`) with secondary `ext4` fallback entries in `fstab.mt6765` and `fstab.mt6762`.
-  - Uses kernel `4.19.325` supported EROFS features (`sb_csum`, `mtime`, `0padding`, `compr_cfgs`, `big_pcluster`).
-EOF
-    fi
-
-    cat <<EOF >> "${NOTES_TMP}"
-
-- **Kernel Toolchain & Module Compilation:**
-  - Built with **Android NDK r30** (LLVM/Clang).
-  - Consolidated MTK connectivity (\`wmt_drv\`, \`wmt_chrdev_wifi\`, \`wlan_drv_gen4m\`, \`bt_drv\`, \`gps_drv\`) and MET modules directly in-tree on \`marlon-cip\`, sequenced in \`vendor.img\`'s \`modules.load\`.
-EOF
-
-    if [[ -n "${EXTRA_NOTES_FILE}" ]]; then
-        [[ -f "${EXTRA_NOTES_FILE}" ]] || die "Extra notes file not found: ${EXTRA_NOTES_FILE}"
-        printf '\n---\n\n' >> "${NOTES_TMP}"
-        cat "${EXTRA_NOTES_FILE}" >> "${NOTES_TMP}"
-        printf '\n' >> "${NOTES_TMP}"
-    fi
-
-    cat <<EOF >> "${NOTES_TMP}"
-
----
-
-### Flashing Instructions
-
-#### Fastboot / Clean Install
-\`\`\`bash
-# 1. Unlock bootloader and reboot to bootloader
-fastboot flash boot boot.img
-fastboot flash dtbo dtbo.img
-fastboot flash recovery recovery.img
-fastboot flash vbmeta vbmeta.img --disable-verity --disable-verification
-
-# 2. Reboot into recovery
-fastboot reboot recovery
-\`\`\`
-
-#### Recovery (ADB Sideload)
-1. In recovery, select **Factory Reset** -> **Format data / factory reset**.
-2. Select **Apply update** -> **Apply from ADB**.
-3. Sideload the full ROM zip:
-\`\`\`bash
-adb sideload ${PRIMARY_ZIP:-"rom.zip"}
-\`\`\`
-4. Reboot system.
-EOF
-
-    if [[ "${PRIMARY_ON_SF}" == "true" ]]; then
         cat <<EOF >> "${NOTES_TMP}"
 
-> **Full ROM Download (SourceForge):** [\`${PRIMARY_ZIP}\`](${PRIMARY_SF_URL}) *(hosted on SourceForge because it exceeds GitHub's 2 GiB release asset limit; SHA-256 listed below)*.
+### Install / Update
+- **Clean install:** Wipe/format data in recovery, then \`adb sideload ${PRIMARY_ZIP:-"rom.zip"}\`
 EOF
-    fi
-
-    if [[ -n "${INCREMENTAL_ZIP}" ]]; then
-        cat <<EOF >> "${NOTES_TMP}"
-
-#### Incremental OTA Update (Existing Matching Baseline Only)
-\`\`\`bash
-adb sideload ${INCREMENTAL_ZIP}
-\`\`\`
-*(Or select **Local update** in Settings -> System -> Updater. Only applies cleanly on top of the exact matching prior baseline build without \`/system\`, \`/vendor\`, or \`/product\` modifications.)*
+        if [[ "${PRIMARY_ON_SF}" == "true" ]]; then
+            cat <<EOF >> "${NOTES_TMP}"
+- **Full ROM download (SourceForge):** [\`${PRIMARY_ZIP}\`](${PRIMARY_SF_URL}) *(>2 GiB GitHub asset limit; SHA-256 below)*
 EOF
-    fi
+        fi
+        if [[ -n "${INCREMENTAL_ZIP}" ]]; then
+            cat <<EOF >> "${NOTES_TMP}"
+- **Incremental OTA:** Use **Settings -> System -> Updater** or \`adb sideload ${INCREMENTAL_ZIP}\` *(requires the immediate prior matching build)*
+EOF
+        fi
     fi
 
     cat <<EOF >> "${NOTES_TMP}"
 
----
+### Checksums (SHA-256)
 
-### Asset Checksums (SHA-256)
-
-| Asset File | Size | SHA-256 Checksum |
+| File | Size | SHA-256 |
 | :--- | :--- | :--- |
 EOF
 
@@ -801,14 +708,6 @@ EOF
         sz="$(human_size "${f}")"
         printf "| \`%s\` | %s | \`%s\` |\n" "${f}" "${sz}" "${sha}" >> "${NOTES_TMP}"
     done
-
-    cat <<'EOF' >> "${NOTES_TMP}"
-
-*Verify all assets with:*
-```bash
-sha256sum -c SHA256SUMS.txt
-```
-EOF
 }
 
 # Publish release idempotently via gh CLI
@@ -1046,12 +945,14 @@ write_ota_json() {
     json_payload="$(python3 - \
         "${PRODUCT_DIR}" "${PRIMARY_ZIP}" "${TARGET_REPO}" "${RELEASE_TAG}" \
         "${ROM_VERSION:-2.9}" "${ROM_TYPE_TAG:-UNOFFICIAL}" \
-        "${INCREMENTAL_ZIP}" "${TARGET_FILES_ZIP}" "${resolved_tf_url}" "${parts_joined}" "${resolved_primary_url}" <<'PY'
-import hashlib, json, pathlib, re, sys, time
+        "${INCREMENTAL_ZIP}" "${TARGET_FILES_ZIP}" "${resolved_tf_url}" "${parts_joined}" "${resolved_primary_url}" \
+        "${BASE_TARGET_FILES_ARG}" "${json_out}" <<'PY'
+import hashlib, json, pathlib, re, sys, time, zipfile
 
 (
     product_dir, primary_zip, repo, tag,
-    version, romtype, incr_zip, tf_zip, tf_url, parts_raw, primary_url
+    version, romtype, incr_zip, tf_zip, tf_url, parts_raw, primary_url,
+    base_tf_zip, existing_json_path
 ) = sys.argv[1:]
 
 pdir = pathlib.Path(product_dir)
@@ -1071,17 +972,49 @@ def sha256_file(p: pathlib.Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+def read_zip_build_props(zpath: pathlib.Path):
+    utc, incr = None, ""
+    if not zpath.is_file():
+        return utc, incr
+    with zipfile.ZipFile(zpath) as zf:
+        names = set(zf.namelist())
+        for candidate in ("SYSTEM/build.prop", "PRODUCT/etc/build.prop"):
+            if candidate in names:
+                for line in zf.read(candidate).decode("utf-8", errors="replace").splitlines():
+                    if line.startswith("ro.build.date.utc=") and utc is None:
+                        utc = int(line.split("=", 1)[1].strip())
+                    elif line.startswith("ro.build.version.incremental=") and not incr:
+                        incr = line.split("=", 1)[1].strip()
+    return utc, incr
+
 build_utc = None
+build_incr = ""
 for prop_path in [pdir / "system/build.prop", pdir / "obj/PACKAGING/target_files_intermediates/lineage_marlon-target_files/SYSTEM/build.prop"]:
     if prop_path.is_file():
         for line in prop_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("ro.build.date.utc="):
+            if line.startswith("ro.build.date.utc=") and build_utc is None:
                 build_utc = int(line.split("=", 1)[1].strip())
-                break
-    if build_utc is not None:
+            elif line.startswith("ro.build.version.incremental=") and not build_incr:
+                build_incr = line.split("=", 1)[1].strip()
+    if build_utc is not None and build_incr:
         break
 if build_utc is None:
     build_utc = int(time.time())
+
+prior_entries = []
+ejp = pathlib.Path(existing_json_path) if existing_json_path else None
+if ejp and ejp.is_file():
+    try:
+        old_data = json.loads(ejp.read_text(encoding="utf-8"))
+        for old_e in old_data.get("response") or []:
+            if isinstance(old_e, dict) and old_e.get("datetime") != build_utc:
+                prior_entries.append(old_e)
+    except Exception:
+        pass
+
+base_utc, base_incr = (None, "")
+if base_tf_zip:
+    base_utc, base_incr = read_zip_build_props(pathlib.Path(base_tf_zip))
 
 base_url = f"https://github.com/{repo}/releases/download/{tag}"
 entry = {
@@ -1093,19 +1026,35 @@ entry = {
     "url": primary_url,
     "version": version,
 }
+if build_incr:
+    entry["incremental_version"] = build_incr
 
 if incr_zip and (pdir / incr_zip).is_file():
     ipath = pdir / incr_zip
-    m = re.search(r"-(\d{8})-to-(\d{8})-INCREMENTAL-", incr_zip)
-    entry["incremental"] = {
-        "base_date": m.group(1) if m else "",
-        "target_date": m.group(2) if m else "",
+    m = re.search(r"-(\d{8})(?:-\d+)?-to-(\d{8})(?:-\d+)?-INCREMENTAL-", incr_zip)
+    base_date = m.group(1) if m else ""
+    target_date = m.group(2) if m else ""
+    if base_utc is None and prior_entries:
+        for pe in prior_entries:
+            pe_dt = pe.get("datetime")
+            if isinstance(pe_dt, int) and pe_dt < build_utc:
+                base_utc = pe_dt
+                base_incr = pe.get("incremental_version") or str(pe_dt)
+                break
+    inc_meta = {
+        "base_date": base_date,
+        "target_date": target_date,
         "filename": incr_zip,
         "id": md5_file(ipath),
         "size": ipath.stat().st_size,
         "sha256": sha256_file(ipath),
         "url": f"{base_url}/{incr_zip}",
     }
+    if base_utc is not None:
+        inc_meta["base_datetime"] = base_utc
+    if base_incr:
+        inc_meta["base_incremental"] = base_incr
+    entry["incremental"] = inc_meta
 
 if tf_zip and pathlib.Path(tf_zip).is_file():
     tf_path = pathlib.Path(tf_zip)
@@ -1138,7 +1087,9 @@ if tf_zip and pathlib.Path(tf_zip).is_file():
 
     entry["target_files"] = tf_meta
 
-print(json.dumps({"response": [entry]}, indent=2))
+all_entries = [entry] + prior_entries
+all_entries.sort(key=lambda e: int(e.get("datetime") or 0), reverse=True)
+print(json.dumps({"response": all_entries[:15]}, indent=2))
 PY
 )"
 
