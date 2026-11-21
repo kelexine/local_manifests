@@ -498,7 +498,7 @@ resolve_previous_baseline() {
     if [[ -n "${json_src}" ]]; then
         log "Resolving previous baseline via OTA JSON: ${json_src}"
         if PREV_TARGET_FILES_ZIP="$(python3 - "${json_src}" "${BASELINE_DIR}" "${curr_utc}" <<'PY'
-import hashlib, json, pathlib, subprocess, sys, urllib.request
+import hashlib, json, os, pathlib, subprocess, sys, urllib.request
 
 json_src, baseline_dir_str, curr_utc = sys.argv[1], sys.argv[2], sys.argv[3]
 baseline_dir = pathlib.Path(baseline_dir_str)
@@ -511,7 +511,35 @@ def sha256_file(path: pathlib.Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+def sf_frs_path(url: str) -> str | None:
+    import re
+    m = re.match(r"^https?://sourceforge\.net/projects/([^/]+)/files/(.+?)(?:/download)?/?$", url)
+    if m:
+        return f"/home/frs/project/{m.group(1)}/{m.group(2)}"
+    return None
+
 def download_file(url: str, dst: pathlib.Path) -> None:
+    frs_path = sf_frs_path(url)
+    if frs_path:
+        sf_user = os.environ.get("OTA_SF_USER", "kelexine")
+        sf_host = os.environ.get("OTA_SF_HOST", "frs.sourceforge.net")
+        sftp_cmd = [
+            "sftp",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "IdentitiesOnly=no",
+        ]
+        sf_key = pathlib.Path.home() / ".ssh" / "sf_key"
+        if sf_key.is_file():
+            sftp_cmd.extend(["-i", str(sf_key)])
+        sftp_cmd.extend([f"{sf_user}@{sf_host}:{frs_path}", str(dst)])
+        print(f"Downloading baseline via SourceForge SFTP: {sf_user}@{sf_host}:{frs_path}", file=sys.stderr, flush=True)
+        res = subprocess.run(sftp_cmd)
+        if res.returncode == 0 and dst.is_file() and dst.stat().st_size > 0:
+            return
+        print("SourceForge SFTP failed or unavailable; falling back to curl...", file=sys.stderr, flush=True)
+        dst.unlink(missing_ok=True)
     subprocess.run(["curl", "-fL", "--retry", "3", "-o", str(dst), url], check=True)
 
 if json_src.startswith(("http://", "https://")):
